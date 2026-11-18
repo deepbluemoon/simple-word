@@ -1,0 +1,10 @@
+.env
+.env.*
+__pycache__/
+.venv/
+.DS_Store
+mlruns/
+*.ckpt
+*.pt
+*.pem
+graphify-out/
