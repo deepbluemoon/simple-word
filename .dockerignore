@@ -1,0 +1,14 @@
+.git
+.github
+.board/
+.venv/
+__pycache__/
+*.egg-info/
+.env
+.env.*
+*.pem
+docs/
+tests/
+mlruns/
+*.ckpt
+*.pt

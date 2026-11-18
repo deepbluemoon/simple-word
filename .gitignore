@@ -9,3 +9,6 @@ mlruns/
 *.pt
 *.pem
 graphify-out/
+
+# 아키텍처 보드 스냅샷 (claude.ai 보드가 원본)
+.board/
