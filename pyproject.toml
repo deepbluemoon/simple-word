@@ -17,3 +17,6 @@ test = ["pytest", "httpx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools]
+packages = ["simple_word", "api", "gate"]
