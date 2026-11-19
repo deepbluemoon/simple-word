@@ -32,7 +32,7 @@ test('서버는 루프백에서 응답하고 연결되지 않은 클라우드를
   ])
   const base = `http://127.0.0.1:${port}`
   const health = await fetch(`${base}/api/health`)
-  assert.deepEqual(await health.json(), { ok: true, host: '127.0.0.1', port })
+  assert.deepEqual(await health.json(), { ok: true, service: 'simple-word-ops-dashboard' })
   const response = await fetch(`${base}/api/refresh`, { method: 'POST' })
   const clouds = await response.json()
   assert.equal(response.status, 200)

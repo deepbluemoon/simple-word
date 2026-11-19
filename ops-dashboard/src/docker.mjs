@@ -1,0 +1,160 @@
+import { execFile, spawn } from 'node:child_process'
+
+const DOCKER_TIMEOUT_MS = 10_000
+const SAFE_CONTAINER_ID = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/
+
+export function assertContainerId(containerId) {
+  if (!SAFE_CONTAINER_ID.test(containerId)) throw new Error('유효하지 않은 컨테이너 ID입니다')
+  return containerId
+}
+
+function runDocker(args, options = {}) {
+  const env = options.dockerHost === undefined ? process.env : dockerEnvironment(options.dockerHost)
+  return new Promise((resolve, reject) => {
+    const child = execFile('docker', args, {
+      encoding: 'utf8',
+      timeout: options.timeout ?? DOCKER_TIMEOUT_MS,
+      maxBuffer: 4 * 1024 * 1024,
+      env,
+    }, (error, stdout, stderr) => {
+      if (error) {
+        const message = String(stderr || error.message).trim() || 'Docker 명령을 실행하지 못했습니다'
+        reject(new Error(message))
+        return
+      }
+      resolve(options.includeStderr ? [stdout, stderr].filter(Boolean).join('\n') : String(stdout))
+    })
+    options.signal?.addEventListener('abort', () => child.kill('SIGTERM'), { once: true })
+  })
+}
+
+function dockerEnvironment(dockerHost) {
+  const env = { ...process.env }
+  delete env.DOCKER_HOST
+  delete env.DOCKER_CONTEXT
+  if (dockerHost !== 'local') env.DOCKER_HOST = dockerHost
+  return env
+}
+
+function parseJsonLines(output) {
+  return output.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line))
+}
+
+export async function listContainers({ dockerHost } = {}) {
+  const output = await runDocker(['ps', '-a', '--format', '{{json .}}'], { dockerHost })
+  return parseJsonLines(output).map((item) => {
+    const composeService = String(item.Labels || '').split(',').map((label) => label.trim()).find((label) => label.startsWith('com.docker.compose.service='))?.split('=').slice(1).join('=')
+    return {
+      id: item.ID,
+      name: item.Names,
+      image: item.Image,
+      state: item.State,
+      status: item.Status,
+      ports: item.Ports || '',
+      createdAt: item.CreatedAt || '',
+      ...(composeService ? { composeService } : {}),
+      ...(dockerHost !== undefined ? { dockerHost } : {}),
+    }
+  })
+}
+
+function parsePercent(value) {
+  const parsed = Number.parseFloat(String(value).replace('%', ''))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseBytes(value) {
+  const match = String(value).trim().match(/^([\d.]+)\s*([KMGTPE]?i?B)?$/i)
+  if (!match) return null
+  const amount = Number.parseFloat(match[1])
+  const unit = (match[2] || 'B').toUpperCase()
+  const units = { B: 0, KB: 1, KIB: 1, MB: 2, MIB: 2, GB: 3, GIB: 3, TB: 4, TIB: 4, PB: 5, PIB: 5, EB: 6, EIB: 6 }
+  return Math.round(amount * (1024 ** (units[unit] ?? 0)))
+}
+
+function parseMemoryUsage(value) {
+  const [used, limit] = String(value).split('/').map((part) => parseBytes(part))
+  return { usedBytes: used ?? null, limitBytes: limit ?? null }
+}
+
+export async function listStats({ dockerHost } = {}) {
+  const output = await runDocker(['stats', '--no-stream', '--format', '{{json .}}'], { dockerHost })
+  return parseJsonLines(output).map((item) => {
+    const memory = parseMemoryUsage(item.MemUsage)
+    return {
+      id: item.Container,
+      name: item.Name,
+      cpuPercent: parsePercent(item.CPUPerc),
+      memoryPercent: parsePercent(item.MemPerc),
+      memoryUsedBytes: memory.usedBytes,
+      memoryLimitBytes: memory.limitBytes,
+      networkIo: item.NetIO || '',
+      blockIo: item.BlockIO || '',
+      pids: Number.parseInt(item.PIDs, 10) || 0,
+    }
+  })
+}
+
+export function filterContainers(containers, {
+  scope = process.env.OPS_CONTAINER_SCOPE || 'name',
+  imagePrefixes = String(process.env.OPS_IMAGE_PREFIXES || '').split(',').map((value) => value.trim()).filter(Boolean),
+  namePrefixes = String(process.env.OPS_NAME_PREFIXES || 'simpleword-').split(',').map((value) => value.trim()).filter(Boolean),
+} = {}) {
+  if (scope === 'all') return containers
+  if (scope === 'image') return containers.filter((item) => imagePrefixes.some((prefix) => item.image.startsWith(prefix)))
+  if (scope === 'name') return containers.filter((item) => namePrefixes.some((prefix) => item.name.startsWith(prefix)))
+  if (scope === 'image-or-name') return containers.filter((item) => imagePrefixes.some((prefix) => item.image.startsWith(prefix)) || namePrefixes.some((prefix) => item.name.startsWith(prefix)))
+  throw new Error(`지원하지 않는 OPS_CONTAINER_SCOPE: ${scope}`)
+}
+
+export async function readSnapshot() {
+  const sources = [{ dockerHost: 'local' }]
+  if (process.env.AWS_SSH_HOST) {
+    if (!/^[\w.@-]+$/.test(process.env.AWS_SSH_HOST)) throw new Error('AWS_SSH_HOST 형식이 올바르지 않습니다')
+    sources.push({ dockerHost: `ssh://${process.env.AWS_SSH_HOST}` })
+  }
+  return (await Promise.all(sources.map(async ({ dockerHost }) => {
+    const [containers, stats] = await Promise.all([listContainers({ dockerHost }), listStats({ dockerHost }).catch(() => [])])
+    return filterContainers(containers).map((container) => ({
+      ...container,
+      running: container.state === 'running',
+      stats: stats.find((item) => item.id === container.id || item.id.startsWith(container.id) || container.id.startsWith(item.id)) || null,
+    }))
+  }))).flat()
+}
+
+export async function readLogs(containerId, { tail = 200, since, dockerHost } = {}) {
+  assertContainerId(containerId)
+  const args = ['logs', '--timestamps', '--tail', String(Math.min(Math.max(Number(tail) || 200, 1), 1_000))]
+  if (since) args.push('--since', String(since))
+  args.push(containerId)
+  const output = await runDocker(args, { timeout: 20_000, includeStderr: true, dockerHost })
+  return output.split('\n').filter(Boolean).sort((left, right) => {
+    const a = left.match(/^\d{4}-\d{2}-\d{2}T\S+/)?.[0]
+    const b = right.match(/^\d{4}-\d{2}-\d{2}T\S+/)?.[0]
+    return a && b ? a.localeCompare(b) : 0
+  }).join('\n')
+}
+
+export function streamLogs(containerId, { tail = 200, onData, onError, onClose, dockerHost } = {}) {
+  assertContainerId(containerId)
+  const args = ['logs', '--follow', '--timestamps', '--tail', String(Math.min(Math.max(Number(tail) || 200, 1), 1_000)), containerId]
+  const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], env: dockerHost === undefined ? process.env : dockerEnvironment(dockerHost) })
+  let buffer = ''
+  const flush = (chunk) => {
+    buffer += chunk.toString()
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) if (line) onData?.(line)
+  }
+  child.stdout.on('data', flush)
+  child.stderr.on('data', flush)
+  child.on('error', (error) => onError?.(error))
+  child.on('close', (code) => {
+    if (buffer) onData?.(buffer)
+    onClose?.(code)
+  })
+  return () => child.kill('SIGTERM')
+}
+
+export { runDocker }

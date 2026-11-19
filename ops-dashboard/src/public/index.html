@@ -1,42 +1,93 @@
 <!doctype html>
 <html lang="ko">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="AWS와 GCP 운영 상태 및 월 비용">
-    <title>Ops Dashboard</title>
-    <link rel="stylesheet" href="/styles.css">
-    <link rel="stylesheet" href="/dashboard.css">
-    <script src="/app.js" defer></script>
-  </head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Simple Word 운영 모니터링 대시보드" />
+    <title>Simple Word Ops · Monitor</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/mode-switch.css" />
+  <script type="module" src="/mode-switch.js"></script><script type="module" src="/clouds.js"></script><script type="module" blocking="render" src="/app.js"></script></head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar" aria-label="대시보드 메뉴">
-        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">O</span><span><b>Ops</b><small>CLOUD DASHBOARD</small></span></div>
+      <aside class="sidebar" aria-label="운영 대시보드 메뉴">
+        <button type="button" id="brand-refresh" class="brand-lockup" title="페이지 새로고침" aria-label="페이지 새로고침"><span class="brand-mark">S</span><span><b>Simple Word Ops</b><small>MONITORING</small></span></button>
         <div class="sidebar-section-label">WORKSPACE</div>
         <nav class="side-nav" aria-label="화면 선택">
-          <a class="nav-item active" href="#clouds" data-tab="clouds" aria-current="page"><span class="nav-icon" aria-hidden="true">◫</span>클라우드 상태</a>
-          <a class="nav-item" href="#costs" data-tab="costs"><span class="nav-icon" aria-hidden="true">＄</span>월 비용</a>
+          <a class="nav-item" href="#overview" data-view-link="overview"><span class="nav-icon" aria-hidden="true">◫</span><span>운영 현황</span><span class="nav-count" id="nav-alert-count">-</span></a>
+          <a class="nav-item" href="#containers" data-view-link="containers"><span class="nav-icon" aria-hidden="true">▦</span><span>컨테이너</span></a>
+          <a class="nav-item" href="#status-codes" data-view-link="status-codes"><span class="nav-icon" aria-hidden="true">⌁</span><span>HTTP 응답</span></a>
+          <a class="nav-item" href="#error-codes" data-view-link="error-codes"><span class="nav-icon" aria-hidden="true">ⓘ</span><span>오류 확인</span></a>
+          <a class="nav-item" href="#packages" data-view-link="packages"><span class="nav-icon" aria-hidden="true">⬡</span><span>패키지 업데이트</span><span class="nav-count" id="nav-package-alert-count">-</span></a>
         </nav>
-        <div class="sidebar-bottom"><p class="sidebar-note">이 Mac에서만 수신 · 30초마다 갱신</p></div>
+        <div class="sidebar-bottom">
+          <div id="engine-card" class="engine-card"><span id="sidebar-engine-dot" class="engine-dot"></span><div><small>DOCKER ENGINE</small><strong id="sidebar-engine">확인 중</strong></div><span id="engine-warning" class="target-indicator hidden" aria-label="선택한 경고 대상">!</span></div>
+          <p class="sidebar-note">5초마다 지표 갱신</p>
+        </div>
       </aside>
+
       <div class="app-main">
         <header class="topbar">
-          <div class="breadcrumb"><span>OPS</span><span class="breadcrumb-divider">/</span><strong id="page-title">클라우드 상태</strong></div>
-          <div class="top-actions"><span class="updated-label">갱신 <time id="updated-at">--:--:--</time></span><button id="refresh" class="refresh-button" type="button">↻ 갱신</button></div>
+          <div class="breadcrumb"><span>SIMPLE WORD OPS</span><span class="breadcrumb-divider">/</span><strong id="page-title">운영 현황</strong></div>
+          <div class="top-actions">
+            <span class="scope-pill" id="scope-label">CONTAINER MONITOR</span>
+            <span class="connection-state"><span class="live-dot"></span><span id="connection-label">Docker 연결 확인 중</span></span>
+            <span class="updated-label">갱신 <time id="last-updated">--:--:--</time></span>
+            <button id="refresh-now" class="refresh-button" type="button" title="지표 갱신"><span aria-hidden="true">↻</span> 갱신</button>
+          </div>
         </header>
-        <main class="content-shell">
-          <section id="clouds-view" class="view" aria-labelledby="clouds-title">
-            <div class="view-heading"><div><p class="eyebrow">INFRASTRUCTURE</p><h1 id="clouds-title">클라우드 상태</h1><p class="view-description">AWS는 SSH Docker 조회, GCP는 Cloud Run과 Cloud Monitoring 데이터를 표시합니다.</p></div></div>
-            <div id="cloud-grid" class="cloud-grid" aria-live="polite"><p class="panel">연결 상태를 확인하고 있습니다.</p></div>
+
+        <main class="content-shell" id="main-content">
+          <div id="error-banner" class="error-banner hidden" role="status" aria-live="polite"></div>
+
+          <section class="view" id="view-overview" aria-labelledby="overview-title">
+            <div class="view-heading"><div><p class="eyebrow">OVERVIEW</p><h1 id="overview-title">운영 현황</h1><p class="view-description">컨테이너의 상태와 자원 사용량을 확인합니다.</p></div><div class="operations-mode-control"><a class="mode-switch" href="/monitor.html" aria-label="모니터링 화면으로 전환"><span class="is-current">운영</span><span>모니터링</span></a><span id="monitor-status" class="live-label"><span></span><span id="monitor-status-text">연결 확인 중</span></span></div></div>
+            <section class="panel cloud-finance-panel" aria-labelledby="cloud-finance-title"><div class="panel-head"><div><p class="eyebrow">CLOUD STATUS · MONTHLY COST</p><h2 id="cloud-finance-title">AWS · GCP 상태 및 비용</h2></div><button id="cloud-refresh" class="text-button" type="button">클라우드 새로고침</button></div><div id="cloud-grid" class="cloud-columns" aria-live="polite"><p class="empty">클라우드 상태를 불러오는 중입니다.</p></div><details class="cloud-costs"><summary>월 비용 보기</summary><p id="cost-note" class="panel-caption"></p><div id="cost-grid" class="cloud-columns" aria-live="polite"><p class="empty">비용 정보를 불러오는 중입니다.</p></div></details></section>
+            <section class="panel overview-alerts" aria-labelledby="response-center-title">
+              <div class="panel-head response-center-head"><div><p class="eyebrow">OPERATIONS DESK</p><h2 id="response-center-title">경고 확인 및 조치</h2><p class="response-center-description">현재 상태를 확인하고 필요한 대응을 여기서 바로 실행하세요.</p></div><span id="response-status" class="response-status">확인 중</span></div>
+              <div class="response-workspace"><div class="response-queue"><div class="response-section-head"><h3>활성 경고 <span id="alert-count">-</span></h3><span>실시간 감지</span></div><div id="alert-preview" class="compact-list"></div></div><div class="response-scripts"><div class="response-section-head"><h3>대응 스크립트</h3><span>관련 경고 발생 시 활성화</span></div><div id="overview-actions" class="overview-actions"></div></div></div>
+              <details class="overview-records"><summary>진단 보고서 · 실행 이력</summary><section class="operator-records" aria-label="운영 실행 기록">
+                  <div class="record-section-head report-section-head"><h3>진단 보고서</h3><button id="cleanup-old-reports" class="text-button" type="button">30일 지난 보고서 정리</button></div>
+                  <div id="report-list" class="record-list" aria-live="polite"><p class="record-empty">보고서를 불러오는 중입니다.</p></div>
+                  <div class="record-section-head"><h3>최근 실행 이력</h3><button id="refresh-records" class="text-button" type="button">새로고침</button></div>
+                  <div id="action-history" class="record-list" aria-live="polite"><p class="record-empty">실행 이력을 불러오는 중입니다.</p></div>
+                </section></details><div id="overview-action-result" class="action-result hidden" role="status" aria-live="polite"></div>
+            </section>
+            <div class="monitor-grid">
+              <section class="panel gauge-panel resource-meter ranking-panel"><div class="panel-head"><h2>CPU 사용량</h2><span class="ranking-top-label">TOP 5</span></div><div id="cpu-ranking" class="resource-ranking" aria-label="CPU 사용량 상위 5개"><div class="ranking-empty">사용량을 확인하는 중입니다.</div></div><p id="cpu-ranking-note" class="ranking-note"></p></section>
+              <section class="panel history-panel"><div class="panel-head"><div><p class="eyebrow">RESOURCE HISTORY</p><h2>자원 사용 추이</h2></div><span class="panel-tag">최근 5분</span></div><div id="resource-history" class="history-chart" aria-live="polite"><div class="chart-empty">수집된 지표가 없습니다.</div></div><div class="legend"><button type="button" data-history-filter="cpu" aria-pressed="true" title="CPU만 표시 · 다시 클릭하면 전체 표시"><i class="legend-cpu"></i>CPU</button><button type="button" data-history-filter="memory" aria-pressed="true" title="메모리만 표시 · 다시 클릭하면 전체 표시"><i class="legend-memory"></i>메모리</button><small>페이지를 연 이후 수집한 값</small></div></section>
+              <section class="panel gauge-panel resource-meter ranking-panel"><div class="panel-head"><h2>메모리 사용량</h2><span class="ranking-top-label">TOP 5</span></div><div id="memory-ranking" class="resource-ranking" aria-label="메모리 사용량 상위 5개"><div class="ranking-empty">사용량을 확인하는 중입니다.</div></div><p id="memory-ranking-note" class="ranking-note"></p></section>
+              <section class="panel io-panel nav-card" data-nav-card="containers" role="link" tabindex="0" aria-label="컨테이너 페이지 열기"><div class="panel-head"><div><p class="eyebrow">CONTAINER I/O</p><h2>네트워크 · 디스크 I/O</h2></div></div><p id="container-counts" class="container-counts"></p><div id="io-summary" class="io-list"></div></section>
+              <section class="panel container-directory"><div class="panel-head"><div><p class="eyebrow">CONTAINER DIRECTORY</p><h2>컨테이너 구성</h2></div><span class="panel-tag">종류 · 상세 정보</span></div><div id="container-directory"></div></section>
+            </div>
           </section>
-          <section id="costs-view" class="view" aria-labelledby="costs-title" hidden>
-            <div class="view-heading"><div><p class="eyebrow">MONTHLY COST</p><h1 id="costs-title">월 비용</h1><p id="cost-note" class="view-description">공시 단가를 사용한 예상 비용입니다.</p></div></div>
-            <div id="cost-grid" class="cloud-grid" aria-live="polite"><p class="panel">비용을 불러오는 중입니다.</p></div>
-          </section>
-          <p id="status" role="status" aria-live="polite" class="sr-only"></p>
+
+          <section class="view hidden" id="view-containers" aria-labelledby="containers-title"><div class="view-heading"><div><p class="eyebrow">INVENTORY</p><h1 id="containers-title">컨테이너</h1><p class="view-description">카드 클릭: 로그 보기 · 가운데 선 드래그: 위치 이동 · 더블클릭: 다음 자리</p></div></div><section id="containers" class="panel fill-panel"><div class="panel-head"><div><p class="eyebrow">RUNTIME INVENTORY</p><h2>컨테이너 상태</h2></div><span class="panel-tag">CPU · MEMORY</span></div><div id="container-list" class="container-list scroll-region"></div></section></section>
+          <section class="view hidden" id="view-status-codes" aria-labelledby="http-title"><div class="view-heading"><div><p class="eyebrow">HTTP OBSERVABILITY</p><h1 id="http-title">HTTP 응답 <span id="http-warning" class="target-indicator hidden" aria-label="선택한 경고 대상">!</span></h1><p class="view-description">수집된 컨테이너 로그의 응답 상태를 표시합니다.</p></div></div><section id="status-codes" class="panel fill-panel"><div class="panel-head"><div><p class="eyebrow">RESPONSE CODES</p><h2>HTTP 상태 분포</h2></div><a href="/docs/http-status-codes.md" class="text-button" target="_blank" rel="noreferrer">상세 안내 ↗</a></div><div class="http-explorer"><div id="status-summary" class="status-chart" aria-live="polite"></div><aside id="http-response-detail" class="http-detail-panel" aria-label="선택한 HTTP 응답 상세" aria-live="polite"></aside></div><p class="panel-caption">최근 수집된 로그 기준 · 일부 로그 수집 실패 시 별도 표시</p></section></section>
+          <section class="view hidden" id="view-error-codes" aria-labelledby="codes-title"><div class="view-heading"><div><p class="eyebrow">REFERENCE</p><h1 id="codes-title">오류 확인</h1><p class="view-description">오류 코드의 발생 조건과 영향, 권장 확인 내용을 찾아봅니다.</p></div></div><section id="error-codes" class="panel fill-panel"><div class="panel-head"><div><p class="eyebrow">ERROR CODE CATALOG</p><h2>오류 코드 안내</h2></div><a href="/docs/error-codes.md" class="text-button" target="_blank" rel="noreferrer">상세 문서 ↗</a></div><div id="codes-list" class="codes-list scroll-region"></div></section></section>
+          <section class="view hidden" id="view-packages" aria-labelledby="packages-title"><div class="view-heading"><div><p class="eyebrow">DEPENDENCY INTELLIGENCE</p><h1 id="packages-title">미적용 업데이트</h1><p class="view-description">프로젝트 pyproject.toml과 ops-dashboard/package.json에서 확인한 버전 기준으로 새 릴리즈를 표시합니다. 보안 권고를 먼저 검토하세요.</p></div><button id="refresh-packages" class="secondary-button" type="button">지금 확인</button></div><div class="package-summary" id="package-summary"><div class="package-stat"><small>설치 확인 패키지</small><strong id="package-count">-</strong></div><div class="package-stat package-stat-danger"><small>보안 권고</small><strong id="package-vulnerability-count">-</strong></div><div class="package-stat"><small>미적용 릴리즈 후보</small><strong id="package-release-count">-</strong></div><div class="package-stat"><small>마지막 확인</small><strong id="package-checked-at">-</strong></div></div><section class="panel package-panel"><div class="panel-head"><div><p class="eyebrow">SECURITY · PRIORITY 1</p><h2>보안 권고</h2></div><div class="package-head-actions"><span class="panel-tag">OSV 데이터 · <b id="package-security-count">-</b>건</span><button id="toggle-package-security" class="text-button" type="button" aria-expanded="true" aria-controls="package-advisories">목록 접기</button></div></div><div id="package-advisories" class="package-list" aria-live="polite"><div class="empty">패키지 정보를 불러오는 중입니다.</div></div></section><section class="panel package-panel"><div class="panel-head"><div><p class="eyebrow">PENDING RELEASES · PRIORITY 2</p><h2>미적용 업데이트</h2></div><span class="panel-tag">패키지별 변경 이력</span></div><div class="package-filters"><label><span>검색</span><input id="package-search" type="search" placeholder="패키지명 또는 버전" autocomplete="off" /></label><label><span>대상</span><select id="package-service-filter"><option value="all">전체</option><option value="simple-word">Simple Word API</option><option value="ops-dashboard">운영 대시보드</option></select></label><label><span>의존성</span><select id="package-scope-filter"><option value="all">전체</option><option value="runtime">직접 의존성</option><option value="optional">선택 의존성</option></select></label><button id="package-expand-all" class="text-button" type="button">모두 펼치기</button></div><div id="package-releases" class="package-list" aria-live="polite"><div class="empty">릴리즈 정보를 불러오는 중입니다.</div></div></section><p class="panel-caption">파이썬 패키지는 현재 프로젝트 가상환경의 설치 버전을 기준으로 합니다. 대시보드 npm 패키지는 package.json과 설치된 package-lock 정보가 있으면 함께 확인합니다. 업데이트는 수동으로 반영하세요.</p></section>
+              <dialog id="action-confirm-dialog" class="action-dialog" aria-labelledby="action-confirm-title">
+                <div class="code-dialog-head"><div><p class="eyebrow">OPERATOR REVIEW</p><h2 id="action-confirm-title">대응 작업 확인</h2></div><button id="close-action-dialog" class="text-button" type="button">닫기</button></div>
+                <p id="action-confirm-description" class="action-dialog-description"></p>
+                <dl class="action-review-details"><div><dt>오류 코드</dt><dd id="action-confirm-code"></dd></div><div><dt>대상</dt><dd id="action-confirm-target"></dd></div></dl>
+                <div class="operator-inputs"><label for="action-operator-name">운영자 이름</label><input id="action-operator-name" maxlength="64" autocomplete="name" required placeholder="이름 입력" /><label for="action-rationale">선택 근거</label><textarea id="action-rationale" maxlength="300" rows="3" required placeholder="이 대응을 선택한 이유를 간단히 입력"></textarea><small>입력한 이름은 인증된 계정 정보가 아닙니다. 실행 기록과 보고서에 저장됩니다.</small></div>
+                <label id="include-logs-option" class="include-logs-option hidden"><input id="include-recent-logs" type="checkbox" /><span><strong>최근 로그 100줄 포함</strong><small>로그에 개인정보나 비밀값이 있을 수 있습니다. 결과 파일을 공유하기 전에 직접 확인하세요.</small></span></label>
+                <div class="action-dialog-buttons"><button id="cancel-action" class="text-button" type="button">취소</button><button id="confirm-action" class="primary-action-button" type="button">검토 후 실행</button></div>
+              </dialog>
+              <div id="operation-toast" class="operation-toast hidden" role="status" aria-live="polite"></div>
+              <dialog id="report-preview-dialog" class="action-dialog" aria-labelledby="report-preview-title">
+                <div class="code-dialog-head"><div><h2 id="report-preview-title">진단 보고서</h2><small id="report-preview-id"></small></div><button id="close-report-preview" class="text-button" type="button" aria-label="보고서 닫기" autofocus>×</button></div>
+                <pre id="report-preview-body" class="report-preview-body" aria-live="polite"></pre>
+              </dialog>
+              <dialog id="record-confirm-dialog" class="action-dialog" aria-labelledby="record-confirm-title">
+                <div class="code-dialog-head"><div><p class="eyebrow">OPERATOR REVIEW</p><h2 id="record-confirm-title">보고서 작업 확인</h2></div><button id="close-record-dialog" class="text-button" type="button">닫기</button></div>
+                <p id="record-confirm-description" class="action-dialog-description"></p>
+                <div class="action-dialog-buttons"><button id="cancel-record-operation" class="text-button" type="button">취소</button><button id="confirm-record-operation" class="primary-action-button" type="button">확인</button></div>
+              </dialog>
+          <section class="view hidden" id="view-not-found"><div class="empty">요청한 화면을 찾을 수 없습니다. <a href="#overview">운영 현황으로 이동</a></div></section>
         </main>
       </div>
     </div>
+
   </body>
 </html>
