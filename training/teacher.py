@@ -25,7 +25,7 @@ PROMPT = """다음 공문서 문장을 초등학생도 이해할 수 있는 쉬�
 
 def build_prompt(src, preserve, nikl):
     extra = ""
-    keep = [t for t in preserve if found(t, src)] + re.findall(r"[「『]([^」』]+)[」』]", src)
+    keep = [t for t in preserve if found(t, src)] + re.findall(r"[「『]([^「『」』]+)[」』]", src)
     if keep:
         extra += f"- 다음 용어·명칭은 바꾸지 말고 그대로 씁니다(필요하면 뒤에 괄호로 쉽게 풀이): {', '.join(keep)}\n"
     swaps = [f"{k} → {'/'.join(v)}" for k, v in nikl.items() if len(k) >= 2 and found(k, src)]
