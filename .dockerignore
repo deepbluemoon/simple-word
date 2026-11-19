@@ -9,6 +9,10 @@ __pycache__/
 *.pem
 docs/
 tests/
+frontend/node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 mlruns/
 *.ckpt
 *.pt

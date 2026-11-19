@@ -12,8 +12,8 @@ from typing import Literal
 from xml.etree import ElementTree
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from api.router import ModelRouter
@@ -216,4 +216,17 @@ def feedback(item: Feedback) -> dict[str, bool]:
     return {"saved": True}
 
 
-app.mount("/", StaticFiles(directory="web", html=True), name="web")
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+
+
+@app.get("/{frontend_path:path}", include_in_schema=False)
+def frontend(frontend_path: str) -> FileResponse:
+    root = FRONTEND_DIST.resolve()
+    requested = (root / frontend_path).resolve()
+    if not requested.is_relative_to(root):
+        raise HTTPException(status_code=404)
+    if requested.is_file():
+        return FileResponse(requested)
+    if Path(frontend_path).suffix or not (root / "index.html").is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(root / "index.html")
