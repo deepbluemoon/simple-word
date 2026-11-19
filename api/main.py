@@ -24,7 +24,8 @@ router = ModelRouter(os.getenv("REGISTRY_PATH", "models/registry.json"))
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_UNPACKED_BYTES = 20 * 1024 * 1024
 MAX_PDF_PAGES = 50
-MAX_SENTENCES = 500
+# shortcut: tune after measuring Lightsail p95 (#6).
+MAX_SENTENCES = int(os.getenv("MAX_SENTENCES", "100"))
 SIMPLIFY_SLOTS = threading.BoundedSemaphore(int(os.getenv("MAX_CONCURRENT_SIMPLIFY", "2")))
 SHADOW_SLOTS = threading.BoundedSemaphore(1)
 feedback_lock = threading.Lock()
@@ -139,7 +140,7 @@ def simplify_content(filename: str, data: bytes, request_id: str):
     text = extract_text(filename, data)
     sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+|\n+", text) if part.strip()]
     if len(sentences) > MAX_SENTENCES:
-        raise HTTPException(status_code=400, detail="Document exceeds 500-sentence limit")
+        raise HTTPException(status_code=400, detail=f"Document exceeds {MAX_SENTENCES}-sentence limit")
     try:
         simplified = model.simplify(sentences)
     except Exception as exc:
