@@ -84,12 +84,14 @@ def _is_int8(path):
     return any(n.op_type in ("DynamicQuantizeLinear", "MatMulInteger", "DynamicQuantizeMatMul") for n in g.node)
 
 
-def evaluate(version, test_path, model_root="models", data_dir="data", with_bert=True):
+def evaluate(version, test_path, model_root="models", data_dir="data", with_bert=True, out=None):
+    """out이 없으면 metadata.json metrics(게이트가 읽는 값)에 쓴다. out을 주면 그 JSON 파일에만 쓰고 metadata는 건드리지 않는다
+    (예: 사람·Claude 검수 평가셋 지표). 정답은 행의 tgt, 없으면 ref."""
     from simple_word.model import Simplifier
 
     model_dir = Path(model_root) / version
     rows = [json.loads(l) for l in Path(test_path).open(encoding="utf-8")]
-    srcs, refs = [r["src"] for r in rows], [r["tgt"] for r in rows]
+    srcs, refs = [r["src"] for r in rows], [r["tgt"] if "tgt" in r else r["ref"] for r in rows]
     simp, outs, ms = Simplifier(str(model_dir)), [], []
     if simp.dummy or not all(_is_int8(model_dir / f) for f in ("encoder.onnx", "decoder.onnx")):
         raise ValueError(f"{model_dir}: INT8 ONNX 모델이 아니다. 게이트 지표는 서빙과 같은 INT8 ONNX로만 계산한다")
@@ -107,12 +109,19 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     m["cpu_p95_ms_per_sentence"] = round(statistics.quantiles(ms, n=20)[18], 1)
     m["model_memory_mb"] = model_memory_mb(model_dir, srcs[:20])
     m["eval_model"] = "onnx_int8_cpu"  # 게이트 지표는 서빙과 같은 INT8 ONNX(onnxruntime CPU, 스레드 1) 출력에서 계산
+    lines = "".join(json.dumps({"src": s, "out": o, "ref": r, "fallback": f}, ensure_ascii=False) + "\n"
+                    for s, o, r, f in zip(srcs, outs, refs, fallbacks))
+    if out:
+        out = Path(out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"version": version, "test": str(test_path), "metrics": m}, ensure_ascii=False, indent=1), encoding="utf-8")
+        out.with_suffix(".outputs.jsonl").write_text(lines, encoding="utf-8")
+        return m
     meta_path = model_dir / "metadata.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["metrics"].update(m)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
-    (model_dir / "test_outputs.jsonl").write_text("".join(json.dumps({"src": s, "out": o, "ref": r, "fallback": f}, ensure_ascii=False) + "\n"
-                                                          for s, o, r, f in zip(srcs, outs, refs, fallbacks)), encoding="utf-8")
+    (model_dir / "test_outputs.jsonl").write_text(lines, encoding="utf-8")
     return m
 
 
@@ -122,5 +131,8 @@ if __name__ == "__main__":
     ap.add_argument("--test")
     ap.add_argument("--data", default="data")
     ap.add_argument("--no-bert", action="store_true")
+    ap.add_argument("--models", default="models")
+    ap.add_argument("--out", help="metadata.json 대신 이 JSON에 지표를 쓴다(평가셋 등)")
     a = ap.parse_args()
-    print(json.dumps(evaluate(a.version, a.test or f"{a.data}/{a.version}/test.jsonl", data_dir=a.data, with_bert=not a.no_bert), ensure_ascii=False))
+    print(json.dumps(evaluate(a.version, a.test or f"{a.data}/{a.version}/test.jsonl", model_root=a.models, data_dir=a.data,
+                              with_bert=not a.no_bert, out=a.out), ensure_ascii=False))
