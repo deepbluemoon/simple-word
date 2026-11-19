@@ -310,6 +310,7 @@ def test_request_log_marks_number_fallback_per_sentence(monkeypatch, tmp_path):
     record = json.loads((tmp_path / "requests.jsonl").read_text().splitlines()[0])
 
     assert [s["simple"] for s in response.json()["sentences"]] == ["20일 이내 신청.", "센터에서 받는다.!"]
+    assert [s["fallback"] for s in response.json()["sentences"]] == [True, False]
     assert [s["fallback"] for s in record["sentences"]] == [True, False]
 
 

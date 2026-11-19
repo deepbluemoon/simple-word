@@ -3,15 +3,17 @@ set -Eeuo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 DEPLOY_DIR="$REPO_ROOT/deploy"
-WORK_DIR="$(mktemp -d)"
+mkdir -p "$REPO_ROOT/.tmp"
+WORK_DIR="$(mktemp -d "$REPO_ROOT/.tmp/deploy-test.XXXXXX")"
 COMPOSE_PROJECT_NAME="codex6-local-${$}"
 GOOD_IMAGE="simple-word-test:good-${$}"
 BROKEN_IMAGE="simple-word-test:broken-${$}"
 ERROR_IMAGE="simple-word-test:error-${$}"
 CANARY_IMAGE="simple-word-test:canary-${$}"
 read -r HOST_PORT CANARY_PORT < <(python3 -c 'import socket; ports=[]
-for _ in range(2):
- s=socket.socket(); s.bind(("0.0.0.0", 0)); ports.append(s.getsockname()[1]); s.close()
+while len(ports) < 2:
+ s=socket.socket(); s.bind(("0.0.0.0", 0)); port=s.getsockname()[1]; s.close()
+ if port != 8000 and port not in ports: ports.append(port)
 print(*ports)')
 mkdir -p "$WORK_DIR/models"
 export COMPOSE_PROJECT_NAME DEPLOY_HOST=127.0.0.1 HOST_PORT CANARY_PORT

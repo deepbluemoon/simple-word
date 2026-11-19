@@ -24,7 +24,7 @@ trap rollback_on_failure EXIT
 
 compose build proxy
 CANARY_ENABLED=0 CANARY_PERCENT=0 CANARY_SPLIT_PERCENT=1 compose up -d --no-build --pull missing api proxy
-if ! wait_healthy api 90 || ! wait_healthy proxy 30 || ! check_proxy_health; then
+if ! wait_healthy api 90 || ! wait_healthy proxy 30 || ! check_proxy_health || ! smoke_check "http://$DEPLOY_HOST:$HOST_PORT"; then
     echo "Deployment health check failed" >&2
     compose logs --no-color --tail 30 api proxy >&2 || true
     exit 1

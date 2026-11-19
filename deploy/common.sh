@@ -57,3 +57,7 @@ health_url() {
 check_proxy_health() {
     curl --fail --silent --show-error --max-time 5 "$(health_url)" >/dev/null
 }
+
+smoke_check() {
+    python3 "$DEPLOY_DIR/../scripts/smoke.py" "$1"
+}

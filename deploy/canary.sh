@@ -38,6 +38,10 @@ if ! wait_healthy canary 90; then
     echo "Canary health check failed" >&2
     exit 1
 fi
+if ! smoke_check "http://$DEPLOY_HOST:$CANARY_PORT"; then
+    echo "Canary smoke check failed" >&2
+    exit 1
+fi
 CANARY_ENABLED=0 CANARY_PERCENT=0 CANARY_SPLIT_PERCENT=1 compose up -d proxy
 CANARY_PERCENT="$CANARY_PERCENT" compose up -d proxy
 if ! wait_healthy proxy 30; then
@@ -73,7 +77,7 @@ fi
 
 CANARY_ENABLED=0 CANARY_PERCENT=0 CANARY_SPLIT_PERCENT=1 compose up -d proxy
 IMAGE="$CANARY_IMAGE" CANARY_ENABLED=0 CANARY_PERCENT=0 CANARY_SPLIT_PERCENT=1 compose up -d --no-build --pull missing api
-if ! wait_healthy api 90 || ! wait_healthy proxy 30 || ! check_proxy_health; then
+if ! wait_healthy api 90 || ! wait_healthy proxy 30 || ! check_proxy_health || ! smoke_check "http://$DEPLOY_HOST:$HOST_PORT"; then
     echo "Promoted image failed health check" >&2
     IMAGE="$previous" CANARY_ENABLED=0 CANARY_PERCENT=0 CANARY_SPLIT_PERCENT=1 compose up -d --no-build --pull missing api proxy >&2 || true
     wait_healthy api 60 || true

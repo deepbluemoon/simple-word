@@ -47,3 +47,12 @@
   - 해보기: `gh run list --workflow CI --limit 5`로 실행을 찾고 `gh run view <RUN_ID>`로 세 job 결과를 확인한다.
 - **Squash 병합 뒤의 충돌**: squash는 PR의 여러 커밋을 새 단일 커밋으로 main에 넣는다. 원래 브랜치의 커밋은 main의 조상으로 기록되지 않으므로, 오래된 브랜치를 다시 main과 합치면 Git이 이미 반영된 패치를 또 적용하려다 충돌할 수 있다. 다음 작업은 최신 main에서 새 브랜치로 시작하고, 이전 브랜치에만 남은 변경이 있으면 그 커밋만 옮긴다.
   - 해보기: `git log --oneline --graph --decorate --all -20`으로 그래프를 확인한 뒤 `git fetch origin && git switch -c codex/new-task origin/main`으로 새 브랜치를 만든다. 미병합 변경만 남았다면 `git cherry-pick <only-unmerged-commit>`을 실행한다.
+
+## 8. 테스트 층
+- **단위 테스트**: `pytest`로 숫자 보존, 라우팅, 입력 검증처럼 코드 한 부분을 빠르게 확인한다.
+- **통합 테스트**: `scripts/integration.py`가 별도 Compose 프로젝트를 띄워 업로드·피드백·동시 요청 제한·레지스트리 교체를 함께 확인한다.
+- **배포 검증**: `deploy/test-local.sh`가 로컬 배포, 카나리, 롤백 절차를 실제 컨테이너로 점검한다.
+- **스모크 테스트**: 배포 직후 `scripts/smoke.py <주소>`로 health와 모델 버전, 숫자 보존, 문장 수, fallback 응답을 빠르게 확인한다.
+- **부하 테스트**: `scripts/load.py`가 동시 요청의 응답 시간 분포와 429 비율을 출력하고, 기준 옵션이 주어지면 초과 시 실패한다.
+- **모델 게이트·parity**: 게이트는 새 모델이 champion 기준을 넘는지 확인하고, parity는 학습 때와 서비스 컨테이너의 출력 차이를 확인한다.
+- **앞으로 할 일**: 웹 UI PR이 병합된 뒤 브라우저 E2E를 별도 작업으로 맡기고, 운영 장애 훈련도 별도 계획으로 추가한다.

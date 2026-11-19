@@ -1,0 +1,36 @@
+name: Nightly tests
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[test]"
+      - run: python scripts/integration.py
+      - run: bash deploy/test-local.sh
+      - name: Start service for load check
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          run_dir="$(mktemp -d "$GITHUB_WORKSPACE/.tmp/nightly.XXXXXX")"
+          project="simpleword-nightly-${GITHUB_RUN_ID}"
+          export MODEL_DIR="$run_dir/models" HOST_PORT=18016
+          mkdir -p "$MODEL_DIR"
+          cleanup() {
+            docker compose -p "$project" -f deploy/compose.yaml down -v --remove-orphans || true
+            rm -rf "$run_dir"
+          }
+          trap cleanup EXIT
+          docker compose -p "$project" -f deploy/compose.yaml up -d --build --wait --wait-timeout 180 api proxy
+          python scripts/smoke.py http://127.0.0.1:18016
+          python scripts/load.py --url http://127.0.0.1:18016/simplify --requests 30 --concurrency 10 --max-p95-ms 5000 --max-429-rate 0.5
