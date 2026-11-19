@@ -93,13 +93,17 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     simp, outs, ms = Simplifier(str(model_dir)), [], []
     if simp.dummy or not all(_is_int8(model_dir / f) for f in ("encoder.onnx", "decoder.onnx")):
         raise ValueError(f"{model_dir}: INT8 ONNX 모델이 아니다. 게이트 지표는 서빙과 같은 INT8 ONNX로만 계산한다")
+    fallbacks = []
     for s in srcs:
         t = time.perf_counter()
-        outs += simp.simplify([s])
+        [(o, fb)] = simp.simplify_detailed([s])  # 서빙과 같은 경로(숫자 안전장치 포함)
         ms.append((time.perf_counter() - t) * 1000)
+        outs.append(o)
+        fallbacks.append(fb)
     m = text_metrics(srcs, outs, refs, preserve_terms(), nikl_dict(data_dir))
     if with_bert:
         m["bert_score"] = bert_score_f1(outs, srcs)  # 원문 대비 의미 유사도
+    m["fallback_rate"] = round(sum(fallbacks) / len(fallbacks), 4)  # 숫자 안전장치로 원문을 돌려준 비율
     m["cpu_p95_ms_per_sentence"] = round(statistics.quantiles(ms, n=20)[18], 1)
     m["model_memory_mb"] = model_memory_mb(model_dir, srcs[:20])
     m["eval_model"] = "onnx_int8_cpu"  # 게이트 지표는 서빙과 같은 INT8 ONNX(onnxruntime CPU, 스레드 1) 출력에서 계산
@@ -107,8 +111,8 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["metrics"].update(m)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
-    (model_dir / "test_outputs.jsonl").write_text("".join(json.dumps({"src": s, "out": o, "ref": r}, ensure_ascii=False) + "\n"
-                                                          for s, o, r in zip(srcs, outs, refs)), encoding="utf-8")
+    (model_dir / "test_outputs.jsonl").write_text("".join(json.dumps({"src": s, "out": o, "ref": r, "fallback": f}, ensure_ascii=False) + "\n"
+                                                          for s, o, r, f in zip(srcs, outs, refs, fallbacks)), encoding="utf-8")
     return m
 
 

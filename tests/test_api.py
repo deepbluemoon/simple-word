@@ -293,3 +293,20 @@ def test_root_serves_upload_page():
 
     assert response.status_code == 200
     assert "쉬운 말로 바꾸기" in response.text
+
+
+def test_request_log_marks_number_fallback_per_sentence(monkeypatch, tmp_path):
+    class GuardedModel:
+        def simplify_detailed(self, sentences):
+            return [(s, True) if "20일" in s else (s + "!", False) for s in sentences]
+
+    class OneRouter:
+        def select(self, request_id):
+            return "v-guard", "champion", GuardedModel(), None, None
+
+    monkeypatch.setattr(api_main, "router", OneRouter())
+    response = client.post("/simplify", files={"file": ("a.txt", "20일 이내 신청.\n센터에서 받는다.")})
+    record = json.loads((tmp_path / "requests.jsonl").read_text().splitlines()[0])
+
+    assert [s["simple"] for s in response.json()["sentences"]] == ["20일 이내 신청.", "센터에서 받는다.!"]
+    assert [s["fallback"] for s in record["sentences"]] == [True, False]
