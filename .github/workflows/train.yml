@@ -1,0 +1,79 @@
+# 자동 학습 (이슈 #8) — 셀프호스티드 러너(label: trainer) 전용 초안.
+#
+# 다른 CI를 깨지 않게:
+#   - push·pull_request로는 돌지 않는다(workflow_dispatch + schedule만).
+#   - 저장소 변수 TRAINER_ENABLED 가 'true'일 때만 job이 뜬다. 러너를 등록하기 전에는
+#     schedule이 건너뛰어져(skipped) 러너 없는 job이 24시간 대기하다 실패하는 일이 없다.
+#
+# 러너 준비(사용자):
+#   1. 학습 머신에 셀프호스티드 러너를 등록하고 label `trainer`를 붙인다.
+#   2. 저장소 변수: TRAINER_ENABLED=true, TRAINER_HOME=<data·raw·models·reports가 남는 고정 폴더>
+#      (러너 작업 폴더는 checkout마다 바뀌고 data/ models/는 git에 없으므로 고정 폴더를 쓴다)
+#   3. 학습 머신에 Ollama(교사 모델)가 떠 있어야 교사 단계가 돈다.
+name: Train
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "data = 수집~검사만, full = 학습 시도까지"
+        type: choice
+        options: [full, data]
+        default: full
+      force:
+        description: "새 짝 수와 상관없이 학습"
+        type: boolean
+        default: false
+      min_new_pairs:
+        description: "직전 학습보다 늘어야 하는 통과 짝 수"
+        default: "200"
+  schedule:
+    - cron: "30 17 * * *"   # 매일 02:30 KST 수집~검사
+    - cron: "0 19 * * 6"    # 매주 일요일 04:00 KST 학습 시도
+
+concurrency:
+  group: trainer
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    if: vars.TRAINER_ENABLED == 'true'
+    runs-on: [self-hosted, trainer]
+    timeout-minutes: 720
+    env:
+      SW_HOME: ${{ vars.TRAINER_HOME }}
+      MODE: ${{ github.event_name == 'schedule' && (github.event.schedule == '30 17 * * *' && 'data' || 'full') || inputs.mode }}
+      FORCE: ${{ inputs.force && '--force' || '' }}
+      MIN_NEW_PAIRS: ${{ inputs.min_new_pairs || '200' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python 환경 (TRAINER_HOME/.venv 재사용)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SW_HOME" || { echo "TRAINER_HOME 변수가 없다"; exit 1; }
+          mkdir -p "$SW_HOME"
+          [ -x "$SW_HOME/.venv/bin/python" ] || python3 -m venv "$SW_HOME/.venv"
+          "$SW_HOME/.venv/bin/python" -m pip install -q -e ".[train,test]"
+      - name: 파이프라인
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--data "$SW_HOME/data" --raw "$SW_HOME/raw" --models "$SW_HOME/models" --reports "$SW_HOME/reports"
+                --min-new-pairs "$MIN_NEW_PAIRS")
+          [ "$MODE" = data ] && args+=(--data-only)
+          [ -n "$FORCE" ] && args+=("$FORCE")
+          "$SW_HOME/.venv/bin/python" -m training.pipeline "${args[@]}"
+      - name: 보고서 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-report-${{ github.run_id }}
+          path: |
+            ${{ vars.TRAINER_HOME }}/reports/pipeline-*.json
+            ${{ vars.TRAINER_HOME }}/reports/MODEL_REPORT.md
+          if-no-files-found: ignore
+          retention-days: 30

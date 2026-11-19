@@ -40,18 +40,26 @@ def check_pair(src, tgt, preserve, nikl):
     return {"checks": c, "passed": not fails, "reject_reason": ",".join(fails) or None}
 
 
-if __name__ == "__main__":
-    import json, sys
+def recheck(data_dir="data"):
+    """pairs.jsonl 전체를 지금 규칙으로 다시 검사해 덮어쓴다. (통과 수, 탈락 이유별 수)를 돌려준다."""
+    import collections, json
     from pathlib import Path
     from training.terms import nikl_dict, preserve_terms
 
-    data = Path(sys.argv[1] if len(sys.argv) > 1 else "data")
+    data = Path(data_dir)
     preserve, nikl = preserve_terms(), nikl_dict(data)
     pairs = [json.loads(l) for l in (data / "pairs.jsonl").open(encoding="utf-8")]
     for p in pairs:
         if p["tgt"]:
             p.update(check_pair(p["src"], p["tgt"], preserve, nikl))
     (data / "pairs.jsonl").write_text("".join(json.dumps(p, ensure_ascii=False) + "\n" for p in pairs), encoding="utf-8")
-    import collections
-    print("passed", sum(p["passed"] for p in pairs), "/", len(pairs))
-    print(dict(collections.Counter(r for p in pairs for r in (p.get("reject_reason") or "").split(",") if r)))
+    reasons = collections.Counter(r for p in pairs for r in (p.get("reject_reason") or "").split(",") if r)
+    return sum(p["passed"] for p in pairs), len(pairs), dict(reasons)
+
+
+if __name__ == "__main__":
+    import sys
+
+    passed, total, reasons = recheck(sys.argv[1] if len(sys.argv) > 1 else "data")
+    print("passed", passed, "/", total)
+    print(reasons)

@@ -44,3 +44,8 @@
 - `codex/slim-image`: Dockerfile을 다단계로 나눠 Python 의존성만 venv에 설치하고, 최종 단계에는 venv·`api/`·`simple_word/`·`frontend/dist`만 복사한다. training·gate 소스, 테스트·캐시, pip·setuptools 및 dist-info의 설치 기록 파일은 최종 이미지에서 제외한다. UID 10001과 Compose healthcheck는 유지한다.
 - `docker history` 비교: 전체 508.9 MB → 426.9 MB(-82.0 MB, -16.1%); 이전 `pip install` 층 224 MB → 새 venv 복사 층 161 MB. `python:3.11-slim`은 유지했다. Alpine은 musl로 ONNX Runtime의 glibc 기반 Linux wheel과 호환 위험이 있고, distroless는 현재 프로젝트의 Python 3.11 런타임 ABI·경로 변경을 수반한다. CPU onnxruntime은 서빙 필수, NumPy는 `simple_word/model.py`의 실제 텐서 입력에 사용한다.
 - 검증: Python 53 passed / 1 skipped, `/health`·`scripts/smoke.py` 통과, ONNX Runtime·NumPy·tokenizers import, UID 10001, Compose health healthy. `training/`·`gate/`는 서비스 import 경로에 없고 최종 컨테이너에도 없다. 로컬 ONNX 모델 파일이 없어 parity 20/20은 실행하지 않았다.
+
+## 2026-11-19 Claude Max #8 준비
+- `max/8-pipeline`: `training/pipeline.py`(단계 건너뛰기·N건 기준·실패 기록·`reports/pipeline-<날짜>.json`), `gate/registry.py`(`register_candidate`: canary 후보 weight 0), 크론·launchd 예시(`deploy/schedule/`), `.github/workflows/train.yml` 초안, `tests/test_pipeline.py`. 설명은 `docs/PIPELINE.md`.
+- 지금 데이터 기준 통과 짝 2,053 = v2 학습 크기 → 새 짝이 200건 늘기 전에는 학습하지 않는다.
+- 남은 것: 러너 등록(label `trainer`)과 저장소 변수 `TRAINER_ENABLED`·`TRAINER_HOME` (사용자).

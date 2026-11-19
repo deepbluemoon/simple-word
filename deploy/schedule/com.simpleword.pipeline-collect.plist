@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- simple-word 자동 학습 예시 (이슈 #8): 매일 02:30 수집~검사. 설치하지 않은 예시 파일이다.
+     설치: /path/to/simple-word 를 실제 경로로 고친 뒤
+       cp deploy/schedule/com.simpleword.pipeline-collect.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.simpleword.pipeline-collect.plist
+     잠자기 중이던 시각은 깨어난 뒤 한 번 실행된다(launchd StartCalendarInterval). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.simpleword.pipeline-collect</string>
+  <key>WorkingDirectory</key>
+  <string>/path/to/simple-word</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/simple-word/.venv/bin/python</string>
+    <string>-m</string>
+    <string>training.pipeline</string>
+    <string>--data-only</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key>
+  <string>/path/to/simple-word/.tmp/pipeline-collect.log</string>
+  <key>StandardErrorPath</key>
+  <string>/path/to/simple-word/.tmp/pipeline-collect.log</string>
+</dict>
+</plist>
