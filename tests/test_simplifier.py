@@ -56,3 +56,13 @@ def test_number_guard_falls_back_only_when_numbers_differ():
     assert simp.simplify_detailed(src) == [("과태료의 20%를 줄여 줍니다.", False), ("20일 이내에 신청하여야 합니다.", True),
                                            ("신청은 행정복지센터에서 받아요.", False)]
     assert simp.simplify(src) == [t for t, _ in simp.simplify_detailed(src)]  # 길이·순서·결정성 그대로
+
+
+def test_preserved_term_guard_falls_back_when_term_dropped():
+    simp = Simplifier.__new__(Simplifier)
+    simp.dummy = False
+    outputs = {"주민등록증 진위확인 서비스를 이용한다.": "주민증을 확인하는 서비스를 써요.",  # 보존 용어 빠짐 → 원문 (v2 test 실제 사례)
+               "주민등록증을 재발급받을 수 있다.": "주민등록증을 다시 받을 수 있어요."}  # 유지 → 모델 출력
+    simp._one = outputs.get
+    assert simp.simplify_detailed(list(outputs)) == [("주민등록증 진위확인 서비스를 이용한다.", True),
+                                                     ("주민등록증을 다시 받을 수 있어요.", False)]

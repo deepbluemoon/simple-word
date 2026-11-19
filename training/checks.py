@@ -2,7 +2,7 @@
 import re
 
 from simple_word.numbers import numbers  # noqa: F401  (서빙과 같은 함수)
-from training.terms import found
+from simple_word.terms import found, missing_terms
 
 ENGLISH = re.compile(r"[A-Za-z][A-Za-z0-9&+\-]*[A-Za-z0-9]")
 
@@ -22,8 +22,8 @@ def check_pair(src, tgt, preserve, nikl):
     c = {}
     ns, nt = numbers(src), numbers(tgt)
     c["numbers"] = {"ok": ns == nt, "missing": sorted(ns - nt), "added": sorted(nt - ns)}
-    keep = [t for t in preserve if found(t, src)] + re.findall(r"[「『]([^「『」』]+)[」』]", src)
-    c["preserve"] = {"ok": not (m := [t for t in keep if t not in tgt]), "missing": m}
+    names = re.findall(r"[「『]([^「『」』]+)[」』]", src)  # 「」 안 법령·사업명도 그대로
+    c["preserve"] = {"ok": not (m := missing_terms(src, tgt, preserve) + [t for t in names if t not in tgt]), "missing": m}
     miss = [f"대상:{n}" for n in target_nouns(src) if n not in tgt]
     if DEADLINE_SRC.search(src) and not DEADLINE_TGT.search(tgt):
         miss.append("기한")

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from simple_word.numbers import numbers
+from simple_word.terms import missing_terms, preserve_terms
 
 EOS = 1  # KoBART: bos = eos = decoder_start = 1
 
@@ -10,6 +11,7 @@ class Simplifier:
 
     artifact_dir 에 encoder.onnx 가 없을 때만 입력을 그대로 돌려주는 더미로 동작한다.
     숫자 안전장치: 출력의 숫자·날짜·금액·비율이 원문과 다르면(100분의 20 = 20% 는 같음) 그 문장은 원문을 돌려준다.
+    보존 용어 안전장치: 원문의 보존 용어(simple_word/preserve_terms.txt)가 출력에서 빠져도 원문을 돌려준다.
     255토큰을 넘는 입력도 원문을 돌려준다. 둘 다 fallback 으로 표시한다.
     """
 
@@ -39,7 +41,8 @@ class Simplifier:
         out = []
         for s in sentences:
             y = self._one(s)
-            out.append((s, True) if y is None or numbers(y) != numbers(s) else (y, False))
+            bad = y is None or numbers(y) != numbers(s) or missing_terms(s, y, preserve_terms())
+            out.append((s, True) if bad else (y, False))
         return out
 
     def _one(self, text, max_len=256):
