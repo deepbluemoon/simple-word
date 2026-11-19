@@ -12,7 +12,7 @@ import { HTTP_STATUS_CODES, HTTP_STATUS_ALERT_RULES } from './http-status.mjs'
 import { readActionHistory, recordActionEvent } from './action-audit.mjs'
 import { createActionReport, deleteExpiredReports, deleteReport, listReports, readReport, readReportReview, updateReportReview } from './reports.mjs'
 import { createPackageMonitor } from './packages.mjs'
-import { readAws, readGcp, readActualCosts } from './clouds.mjs'
+import { readAws, readGcp, readLocalDocker, readActualCosts } from './clouds.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const publicDir = path.join(root, 'public')
@@ -28,14 +28,15 @@ const projectRoot = process.env.OPS_PROJECT_ROOT || path.resolve(root, '../..')
 const fxValue = Number(process.env.USD_KRW || 1350)
 const fx = Number.isFinite(fxValue) && fxValue > 0 ? fxValue : 1350
 const prices = JSON.parse(await fs.readFile(path.join(root, 'prices.json'), 'utf8'))
-let cloudSnapshot = { updatedAt: null, aws: { connected: false, error: '확인 중', containers: [] }, gcp: { connected: false, error: '확인 중', services: [] } }
+let cloudSnapshot = { updatedAt: null, aws: { connected: false, error: '확인 중', servers: [] }, gcp: { connected: false, error: '확인 중', services: [] }, local: { connected: false, error: '확인 중', servers: [] } }
 
 async function refreshClouds() {
-  const [aws, gcp] = await Promise.allSettled([readAws(), readGcp()])
+  const [aws, gcp, local] = await Promise.allSettled([readAws(), readGcp(), readLocalDocker()])
   cloudSnapshot = {
     updatedAt: new Date().toISOString(),
-    aws: aws.status === 'fulfilled' ? { connected: true, containers: aws.value } : { connected: false, error: aws.reason.message, containers: [] },
+    aws: aws.status === 'fulfilled' ? { connected: true, servers: aws.value } : { connected: false, error: aws.reason.message, servers: [] },
     gcp: gcp.status === 'fulfilled' ? { connected: true, services: gcp.value } : { connected: false, error: gcp.reason.message, services: [] },
+    local: local.status === 'fulfilled' ? { connected: true, servers: local.value } : { connected: false, error: local.reason.message, servers: [] },
   }
   return cloudSnapshot
 }
