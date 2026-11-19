@@ -1,5 +1,7 @@
 .env
 .env.*
+!.env.example
+!ops-dashboard/.env.example
 __pycache__/
 .venv/
 *.egg-info/
@@ -20,4 +22,5 @@ models/
 # 에이전트 작업 폴더(git worktree)와 임시 파일. 프로젝트 밖에 만들지 않는다.
 .worktrees/
 .tmp/
+.ops-data/
 .cache/

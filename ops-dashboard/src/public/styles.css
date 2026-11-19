@@ -572,3 +572,18 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.cloud-finance-panel { margin-bottom: 14px; }
+.cloud-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.cloud-card { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-deep); }
+.cloud-card h3 { margin: 0; color: var(--text); font-size: 12px; }
+.cloud-card p { margin: 7px 0 0; color: var(--muted); line-height: 1.55; overflow-wrap: anywhere; }
+.cloud-card .cloud-line { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line-soft); color: var(--muted); }
+.cloud-card .cloud-line:first-of-type { margin-top: 9px; }
+.cloud-state { color: var(--green); font: 10px var(--mono); }
+.cloud-state.is-offline { color: var(--amber); }
+.cloud-costs { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.cloud-costs summary { color: var(--text); cursor: pointer; font-weight: 600; }
+.cloud-costs .panel-caption { margin: 8px 0; }
+.cloud-costs .cost-sum { color: var(--text); font-weight: 650; }
+@media (max-width: 720px) { .cloud-columns { grid-template-columns: 1fr; } }

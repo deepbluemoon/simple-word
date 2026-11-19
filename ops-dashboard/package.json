@@ -2,14 +2,16 @@
   "name": "simple-word-ops-dashboard",
   "version": "0.1.0",
   "private": true,
-  "description": "Local AWS and GCP operations dashboard",
+  "description": "Simple Word operations dashboard",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "dev": "node --watch src/server.mjs",
-    "start": "node src/server.mjs",
-    "test": "node --test"
+    "dev": "node --env-file-if-exists=../.env --watch src/server.mjs",
+    "start": "node --env-file-if-exists=../.env src/server.mjs",
+    "test": "mkdir -p ../.tmp && TMPDIR=../.tmp node --test",
+    "test:coverage": "mkdir -p ../.tmp && TMPDIR=../.tmp node --test --experimental-test-coverage --test-coverage-include='src/{action-audit,docker,errors,http-status,monitor}.mjs' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80",
+    "check": "node --check src/server.mjs && node --check src/docker.mjs && node --check src/monitor.mjs && node --check src/http-status.mjs && node --check src/actions.mjs && node --check src/action-audit.mjs && node --check src/reports.mjs && node --check src/packages.mjs && node --check src/clouds.mjs && node --check src/public/app.js && node --check src/public/clouds.js"
   }
 }
