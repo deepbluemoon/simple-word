@@ -1,3 +1,7 @@
+import io
+import zipfile
+
+from pypdf import PdfWriter
 from fastapi.testclient import TestClient
 
 from api.main import app
@@ -32,3 +36,69 @@ def test_simplify_rejects_non_txt_file():
     response = client.post("/simplify", files={"file": ("notice.pdf", b"data")})
 
     assert response.status_code == 400
+
+
+def zipped_file(entries):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, value in entries.items():
+            archive.writestr(name, value)
+    return buffer.getvalue()
+
+
+def test_simplify_extracts_docx_text():
+    document = zipped_file({"word/document.xml": '<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>안내 문장입니다.</w:t></w:r></w:p></w:body></w:document>'})
+
+    response = client.post("/simplify", files={"file": ("notice.docx", document)})
+
+    assert response.status_code == 200
+    assert response.json()["sentences"] == [{"original": "안내 문장입니다.", "simple": "안내 문장입니다."}]
+
+
+def test_simplify_extracts_hwpx_text():
+    section = '<hs:sec xmlns:hs="urn:hs" xmlns:hp="urn:hp"><hp:p><hp:run><hp:t>공고 내용입니다.</hp:t></hp:run></hp:p></hs:sec>'
+    document = zipped_file({"Contents/section0.xml": section})
+
+    response = client.post("/simplify", files={"file": ("notice.hwpx", document)})
+
+    assert response.status_code == 200
+    assert response.json()["sentences"][0]["original"] == "공고 내용입니다."
+
+
+def test_simplify_accepts_valid_pdf():
+    buffer = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.write(buffer)
+
+    response = client.post("/simplify", files={"file": ("notice.pdf", buffer.getvalue())})
+
+    assert response.status_code == 200
+
+
+def test_simplify_rejects_empty_and_oversized_files():
+    empty = client.post("/simplify", files={"file": ("empty.txt", b"")})
+    oversized = client.post("/simplify", files={"file": ("large.txt", b"a" * (5 * 1024 * 1024 + 1))})
+
+    assert empty.status_code == 400
+    assert "empty" in empty.json()["detail"].lower()
+    assert oversized.status_code == 400
+    assert "5 mb" in oversized.json()["detail"].lower()
+
+
+def test_feedback_appends_jsonl(tmp_path, monkeypatch):
+    monkeypatch.setattr("api.main.LOG_DIR", tmp_path)
+
+    response = client.post("/feedback", json={
+        "model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up",
+    })
+
+    assert response.status_code == 200
+    assert (tmp_path / "feedback.jsonl").read_text(encoding="utf-8") == '{"model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up"}\n'
+
+
+def test_root_serves_upload_page():
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "쉬운 말로 바꾸기" in response.text
