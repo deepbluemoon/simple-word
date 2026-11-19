@@ -11,10 +11,14 @@ dependencies = [
     "uvicorn",
     "python-multipart",
     "pypdf",
+    "numpy",
+    "onnxruntime",
+    "tokenizers",
 ]
 
 [project.optional-dependencies]
 test = ["pytest", "httpx"]
+train = ["torch", "transformers", "onnx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
