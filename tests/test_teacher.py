@@ -17,3 +17,13 @@ def test_teacher_prompt_has_terms_and_rerun_skips_done(tmp_path):
     assert "거버넌스 → 협치/관리" in prompts[0] and "영어 단어·약어는 그대로 씁니다: AI" in prompts[0]
     [pair] = [json.loads(l) for l in (tmp_path / "pairs.jsonl").open(encoding="utf-8")]
     assert pair["teacher"] == "ollama:gemma3:27b" and pair["passed"] is True
+
+
+def test_plan_caps_per_doc_and_orders_recent_first(tmp_path):
+    docs = [{"id": "old", "published_at": "2025-01-01"}, {"id": "new", "published_at": "2026-11-01"}]
+    (tmp_path / "docs.jsonl").write_text("".join(json.dumps(d) + "\n" for d in docs))
+    sents = [{"doc_id": d, "idx": i, "text": f"{d} 문장 {i}"} for d in ("old", "new") for i in range(5)]
+    (tmp_path / "sentences.jsonl").write_text("".join(json.dumps(s, ensure_ascii=False) + "\n" for s in sents))
+    got = teacher.plan(tmp_path, done={"old 문장 0"}, per_doc=2, recent_first=True)
+    assert [s["doc_id"] for s in got] == ["new", "new", "old"]  # old는 이미 1개 만들어 1개만 더
+    assert got == teacher.plan(tmp_path, done={"old 문장 0"}, per_doc=2, recent_first=True)

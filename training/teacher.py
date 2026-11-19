@@ -1,8 +1,11 @@
 """sentences.jsonl → pairs.jsonl. 교사: Ollama gemma3:27b, temperature 0.2. 이미 만든 src는 건너뛴다.
 
-`python -m training.teacher [--limit N]`
+`python -m training.teacher [--limit N] [--per-doc 8] [--recent-first]`
+--per-doc N: 문서마다 최대 N문장만(문장 sha1 순으로 골라 결정적). 이미 만든 짝도 그 문서의 N에 센다.
+--recent-first: docs.jsonl 게시일이 최근인 문서부터. 중간에 멈춰도 최근 글부터 쌓인다.
 """
-import argparse, json, re, urllib.request
+import argparse, hashlib, json, re, urllib.request
+from collections import defaultdict
 from pathlib import Path
 
 from training import checks
@@ -46,15 +49,33 @@ def generate(prompt):
     return re.sub(r"^\s*쉬운 말\s*[:：]\s*", "", out).strip().strip('"“”')
 
 
-def run(data_dir="data", limit=None, gen=generate, log=print):
+def plan(data_dir, done, per_doc=None, recent_first=False):
+    """교사에게 보낼 문장 순서. per_doc이면 문서마다 sha1 순 앞 N개(이미 만든 짝 포함)만."""
+    sents = [json.loads(l) for l in (Path(data_dir) / "sentences.jsonl").open(encoding="utf-8")]
+    if per_doc:
+        by_doc = defaultdict(list)
+        for s in sents:
+            by_doc[s["doc_id"]].append(s)
+        keep = set()
+        for rows in by_doc.values():
+            made = [r for r in rows if r["text"] in done]
+            rest = sorted((r for r in rows if r["text"] not in done), key=lambda r: hashlib.sha1(r["text"].encode()).hexdigest())
+            keep.update(id(r) for r in rest[: max(per_doc - len(made), 0)])
+        sents = [s for s in sents if id(s) in keep]
+    if recent_first:
+        pub = {d["id"]: d["published_at"] for d in map(json.loads, (Path(data_dir) / "docs.jsonl").open(encoding="utf-8"))}
+        sents.sort(key=lambda s: (pub.get(s["doc_id"], ""), s["doc_id"], -s["idx"]), reverse=True)
+    return sents
+
+
+def run(data_dir="data", limit=None, gen=generate, log=print, per_doc=None, recent_first=False):
     data_dir = Path(data_dir)
     pairs_path = data_dir / "pairs.jsonl"
     done = {json.loads(l)["src"] for l in pairs_path.open(encoding="utf-8")} if pairs_path.exists() else set()
     preserve, nikl = preserve_terms(), nikl_dict(data_dir)
     n = 0
     with pairs_path.open("a", encoding="utf-8") as out:
-        for line in (data_dir / "sentences.jsonl").open(encoding="utf-8"):
-            s = json.loads(line)
+        for s in plan(data_dir, done, per_doc, recent_first):
             if s["text"] in done or (limit is not None and n >= limit):
                 continue
             tgt = gen(build_prompt(s["text"], preserve, nikl))
@@ -75,5 +96,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="data")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--per-doc", type=int, help="문서마다 최대 문장 수")
+    ap.add_argument("--recent-first", action="store_true", help="최근 문서부터")
     a = ap.parse_args()
-    print("pairs", run(a.data, a.limit))
+    print("pairs", run(a.data, a.limit, per_doc=a.per_doc, recent_first=a.recent_first))
