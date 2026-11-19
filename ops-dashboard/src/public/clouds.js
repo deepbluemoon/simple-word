@@ -13,6 +13,71 @@ function line(label, value) {
   return row
 }
 
+function badge(text, kind = '') {
+  const node = document.createElement('span')
+  node.className = `cloud-role${kind ? ` is-${kind}` : ''}`
+  node.textContent = text
+  return node
+}
+
+function group(title, caption, rows) {
+  const section = document.createElement('section')
+  section.className = 'cloud-service'
+  const heading = document.createElement('div')
+  heading.className = 'cloud-service-head'
+  const name = document.createElement('strong')
+  name.textContent = title
+  heading.append(name)
+  if (caption) {
+    const note = document.createElement('span')
+    note.textContent = caption
+    heading.append(note)
+  }
+  section.append(heading, ...rows)
+  return section
+}
+
+function dockerServer(server) {
+  const services = (server.services || []).map((service) => group(service.name, '', (service.containers || []).map((container) => {
+    const details = document.createElement('div')
+    details.className = 'cloud-runtime-row'
+    const main = document.createElement('div')
+    main.className = 'cloud-runtime-name'
+    main.append(badge(container.role || container.service || 'container', container.role || 'service'))
+    const name = document.createElement('strong')
+    name.textContent = container.name
+    main.append(name)
+    const image = document.createElement('small')
+    image.textContent = container.image || '이미지 없음'
+    const status = document.createElement('small')
+    status.textContent = `${container.health || container.state || '상태 미상'} · CPU ${container.cpu || '—'} · 메모리 ${container.memory || '—'}`
+    details.append(main, image, status)
+    return details
+  })))
+  return group(server.name, '', services)
+}
+
+function gcpService(service) {
+  const revisions = (service.revisions || []).map((revision) => {
+    const row = document.createElement('div')
+    row.className = 'cloud-runtime-row'
+    const name = document.createElement('div')
+    name.className = 'cloud-runtime-name'
+    name.append(badge(revision.role === 'canary' ? '카나리' : revision.role === 'shadow' ? '섀도' : '서비스', revision.role))
+    const revisionName = document.createElement('strong')
+    revisionName.textContent = revision.name
+    name.append(revisionName)
+    const info = document.createElement('small')
+    const created = revision.createdAt ? new Date(revision.createdAt).toLocaleString('ko-KR') : '생성 시각 —'
+    info.textContent = `${revision.ready ? '정상' : '준비 안 됨'} · 생성 ${created} · 트래픽 ${number(revision.trafficPercent, 1)}% · 인스턴스 ${revision.instances == null ? '—' : number(revision.instances)} · CPU ${revision.cpuUtilization == null ? '—' : `${number(revision.cpuUtilization, 1)}%`} · 메모리 ${revision.memoryUtilization == null ? '—' : `${number(revision.memoryUtilization, 1)}%`}`
+    const image = document.createElement('small')
+    image.textContent = revision.image || '이미지 없음'
+    row.append(name, info, image)
+    return row
+  })
+  return group(`${service.name} · ${service.region}`, `최소 ${number(service.minInstances)} / 최대 ${service.maxInstances == null ? '미설정' : number(service.maxInstances)} 인스턴스`, revisions)
+}
+
 function cloudCard(title, status, rows) {
   const card = document.createElement('section')
   card.className = 'cloud-card'
@@ -39,9 +104,10 @@ function cloudCard(title, status, rows) {
 }
 
 function renderClouds(data) {
-  const aws = (data.aws.containers || []).map((item) => line(item.name, `${item.state} · CPU ${item.cpu || '—'} · 메모리 ${item.memory || '—'}`))
-  const gcp = (data.gcp.services || []).map((item) => line(item.name, `${item.ready ? '정상' : '비정상'} · 요청 ${number(item.requests)} · 오류율 ${(Number(item.errorRate || 0) * 100).toFixed(2)}%`))
-  $('cloud-grid').replaceChildren(cloudCard('AWS Lightsail', data.aws, aws), cloudCard('GCP Cloud Run', data.gcp, gcp))
+  const aws = (data.aws.servers || []).map(dockerServer)
+  const gcp = (data.gcp.services || []).map(gcpService)
+  const local = (data.local.servers || []).map(dockerServer)
+  $('cloud-grid').replaceChildren(cloudCard('AWS Lightsail', data.aws, aws), cloudCard('GCP Cloud Run', data.gcp, gcp), cloudCard('로컬 Docker', data.local, local))
 }
 
 function costRows(cloud, data) {

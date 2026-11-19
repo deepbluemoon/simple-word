@@ -575,15 +575,29 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 
 .cloud-finance-panel { margin-bottom: 14px; }
 .cloud-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+#cloud-grid.cloud-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
 .cloud-card { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-deep); }
 .cloud-card h3 { margin: 0; color: var(--text); font-size: 12px; }
 .cloud-card p { margin: 7px 0 0; color: var(--muted); line-height: 1.55; overflow-wrap: anywhere; }
 .cloud-card .cloud-line { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line-soft); color: var(--muted); }
 .cloud-card .cloud-line:first-of-type { margin-top: 9px; }
+.cloud-service { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line-soft); min-width: 0; }
+.cloud-service-head { display: flex; justify-content: space-between; gap: 8px; color: var(--text); font-size: 11px; overflow-wrap: anywhere; }
+.cloud-service-head span { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.cloud-runtime-row { min-width: 0; padding: 8px 0 0 8px; color: var(--muted); font-size: 10px; }
+.cloud-runtime-row small { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.cloud-runtime-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text); }
+.cloud-runtime-name strong { overflow-wrap: anywhere; }
+.cloud-role { flex: none; padding: 2px 5px; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); font: 9px var(--mono); }
+.cloud-role.is-api { color: var(--green); }
+.cloud-role.is-proxy { color: var(--blue); }
+.cloud-role.is-canary { color: var(--amber); }
+.cloud-role.is-shadow { color: var(--purple); }
 .cloud-state { color: var(--green); font: 10px var(--mono); }
 .cloud-state.is-offline { color: var(--amber); }
 .cloud-costs { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .cloud-costs summary { color: var(--text); cursor: pointer; font-weight: 600; }
 .cloud-costs .panel-caption { margin: 8px 0; }
 .cloud-costs .cost-sum { color: var(--text); font-weight: 650; }
-@media (max-width: 720px) { .cloud-columns { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { #cloud-grid.cloud-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .cloud-columns, #cloud-grid.cloud-columns { grid-template-columns: 1fr; } }
