@@ -38,4 +38,9 @@
 ## 서비스 프론트엔드 개선
 - `codex/frontend-polish`: 붙여넣기 입력, 비교 화면의 변경 단어·숫자 표시와 스크롤 동기화, 폴백 사유, 글자 크기 저장·쉬운 말 이어 읽기·복사/내려받기, 429 재시도 상태를 추가했다.
 - API는 문단 경계를 보존하고 문장별 폴백 사유와 문단 번호를 반환한다. `simplify_detailed()` 기존 계약은 유지한다.
-- 검증: 프런트 단위 11개, 빌드 통과, E2E 2개, Python 50 passed / 1 skipped. 로컬 v2 모델 파일이 없어 실제 모델 parity 검증은 해당하지 않는다.
+- 검증: 프런트 단위 11개, 빌드 통과, E2E 2개, Python 53 passed / 1 skipped. 로컬 v2 모델 파일이 없어 실제 모델 parity 검증은 해당하지 않는다.
+
+## 실행 이미지 축소
+- `codex/slim-image`: Dockerfile을 다단계로 나눠 Python 의존성만 venv에 설치하고, 최종 단계에는 venv·`api/`·`simple_word/`·`frontend/dist`만 복사한다. training·gate 소스, 테스트·캐시, pip·setuptools 및 dist-info의 설치 기록 파일은 최종 이미지에서 제외한다. UID 10001과 Compose healthcheck는 유지한다.
+- `docker history` 비교: 전체 508.9 MB → 426.9 MB(-82.0 MB, -16.1%); 이전 `pip install` 층 224 MB → 새 venv 복사 층 161 MB. `python:3.11-slim`은 유지했다. Alpine은 musl로 ONNX Runtime의 glibc 기반 Linux wheel과 호환 위험이 있고, distroless는 현재 프로젝트의 Python 3.11 런타임 ABI·경로 변경을 수반한다. CPU onnxruntime은 서빙 필수, NumPy는 `simple_word/model.py`의 실제 텐서 입력에 사용한다.
+- 검증: Python 53 passed / 1 skipped, `/health`·`scripts/smoke.py` 통과, ONNX Runtime·NumPy·tokenizers import, UID 10001, Compose health healthy. `training/`·`gate/`는 서비스 import 경로에 없고 최종 컨테이너에도 없다. 로컬 ONNX 모델 파일이 없어 parity 20/20은 실행하지 않았다.
