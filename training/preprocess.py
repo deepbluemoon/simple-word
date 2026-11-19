@@ -12,7 +12,7 @@ PII = [  # 순서 중요: 주민번호가 전화번호 형식에 먼저 걸리�
 ]
 STOP_LINE = re.compile(r"^\W*(?:(?:담당\s*자|담당\s*부서|문의처?)\s*[:：]|붙\s*임\b)")  # 이 줄부터 끝까지 버림
 ATTACH = re.compile(r"\.(?:hwpx?|pdf|docx?|xlsx?|zip|jpe?g|png)\b", re.I)
-BULLET = re.compile(r"^(?:[-–―·•◦○●□■◇◆▶▷ㅇ※*]|\d+[.)]|[①-⑳])\s*")
+BULLET = re.compile(r"^(?:[-–―·•◦○●□■◇◆▶▷△▲ㅇ※*<>]+|\d+[.)]|[①-⑳])\s*")
 
 
 def mask_pii(s):
@@ -29,7 +29,7 @@ def clean_lines(body):
             break
         if ATTACH.search(line):
             continue
-        line = re.sub(r"\s*-$", "", BULLET.sub("", line)).strip()
+        line = re.sub(r"\s*[->]$", "", BULLET.sub("", line)).strip()
         if line:
             lines.append(line)
     merged = []  # 쉼표로 끝난 줄은 다음 줄과 이어진 문장
@@ -44,7 +44,7 @@ def clean_lines(body):
 def split_sentences(body):
     out = []
     for line in clean_lines(body):
-        out += [s.strip() for s in re.split(r"(?<=[.?!])\s+", mask_pii(line)) if s.strip()]
+        out += [s.strip() for s in re.split(r"(?<=[^\d\s][.?!])\s+", mask_pii(line)) if s.strip()]  # "2026. 4." 같은 날짜에서는 안 자름
     return out
 
 
