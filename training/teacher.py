@@ -28,7 +28,7 @@ def build_prompt(src, preserve, nikl):
     keep = [t for t in preserve if found(t, src)] + re.findall(r"[「『]([^「『」』]+)[」』]", src)
     if keep:
         extra += f"- 다음 용어·명칭은 바꾸지 말고 그대로 씁니다(필요하면 뒤에 괄호로 쉽게 풀이): {', '.join(keep)}\n"
-    swaps = [f"{k} → {'/'.join(v)}" for k, v in nikl.items() if len(k) >= 2 and found(k, src)]
+    swaps = [f"{k} → {'/'.join(v['alternatives'])}" for k, v in nikl.items() if found(k, src)]
     if swaps:
         extra += f"- 다음 외래어는 쉬운 우리말로 바꿉니다: {'; '.join(swaps)}\n"
     eng = list(dict.fromkeys(ENGLISH.findall(src)))
