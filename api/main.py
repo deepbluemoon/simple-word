@@ -161,8 +161,8 @@ def simplify_content(filename: str, data: bytes, request_id: str):
     payload = {
         "model_version": version,
         "sentences": [
-            {"original": original, "simple": simple}
-            for original, simple in zip(sentences, simplified)
+            {"original": original, "simple": simple, "fallback": fallback}  # fallback: 안전장치로 원문을 돌려준 문장(로그와 같은 값)
+            for original, simple, fallback in zip(sentences, simplified, fallbacks)
         ],
     }
     return payload, sentences, shadow_version, shadow_model
