@@ -4,7 +4,7 @@ EOS = 1  # KoBART: bos = eos = decoder_start = 1
 
 
 class Simplifier:
-    """models/<version>/ 의 ONNX(INT8)를 onnxruntime(CPU)으로 불러 탐욕 디코딩(결정적).
+    """models/<version>/ 의 ONNX(INT8)를 onnxruntime(CPU)으로 불러 탐욕 디코딩(결정적, self-attention KV 캐시).
 
     artifact_dir 에 encoder.onnx 가 없을 때만 입력을 그대로 돌려주는 더미로 동작한다.
     """
@@ -36,11 +36,18 @@ class Simplifier:
         ids = self.tok.encode(text, add_special_tokens=False).ids[: max_len - 1] + [EOS]
         x = np.array([ids], dtype=np.int64)
         mask = np.ones_like(x)
-        hidden = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})[0]
+        cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})  # 층별 cross K/V, 한 번만
+        feed = {"attention_mask": mask}
+        feed.update((o.name, c) for o, c in zip(self.encoder.get_outputs(), cross))
+        heads, hd = cross[0].shape[1], cross[0].shape[3]
+        past_names = [i.name for i in self.decoder.get_inputs() if i.name.startswith("past_")]
+        past = [np.zeros((1, heads, 0, hd), dtype=np.float32) for _ in past_names]  # KV 캐시, 처음엔 길이 0
         out = [EOS]
-        for _ in range(min(2 * len(ids) + 16, max_len)):
-            logits = self.decoder.run(None, {"decoder_input_ids": np.array([out], dtype=np.int64),
-                                              "encoder_hidden_states": hidden, "attention_mask": mask})[0]
+        for step in range(min(2 * len(ids) + 16, max_len)):
+            feed.update(zip(past_names, past))
+            feed["input_ids"] = np.array([[out[-1]]], dtype=np.int64)
+            feed["position_ids"] = np.array([[step]], dtype=np.int64)
+            logits, *past = self.decoder.run(None, feed)
             nxt = int(logits[0, -1].argmax())
             if nxt == EOS:
                 break
