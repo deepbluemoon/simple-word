@@ -19,3 +19,10 @@ def test_checks_catch_t2_teacher_errors():
     assert reasons("’26/’27년 동절기", "2026년, 2027년 겨울") is None
     assert reasons("「약사법 시행령 의견, 「고시」 의견", "약사법 시행령 의견, 「고시」 의견") is None  # 안 닫힌 괄호
     assert reasons("3억 5,000만 원을 지원한다.", "3억 원을 지원해요.") == "numbers"
+
+
+def test_checks_reject_long_or_multiline_teacher_output():
+    src = "과태료를 감경합니다."  # 10자
+    assert reasons(src, "과태료를 줄여 줍니다.") is None  # 11자, 1.1배
+    assert reasons(src, "과태료를 줄여 드려요. 꼭 확인하세요.") == "length"  # 1.3배 초과
+    assert reasons(src, "과태료를\n줄여요.") == "multiline"

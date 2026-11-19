@@ -2,13 +2,11 @@
 import csv, io, json, re, urllib.request
 from pathlib import Path
 
+from simple_word.terms import found, preserve_terms  # noqa: F401  (서빙과 같은 목록·함수)
+
 NIKL_META = ("https://www.data.go.kr/tcs/dss/selectFileDataDownload.do?publicDataPk=15130006"
              "&publicDataDetailPk=uddi:965e39a6-8b5f-4eb1-aeb2-8d8a2122147c&fileDetailSn=1")
 NIKL_FILE = "https://www.data.go.kr/cmm/cmm/fileDownload.do?atchFileId={id}&fileDetailSn=1"
-
-
-def preserve_terms(path=Path(__file__).with_name("preserve_terms.txt")):
-    return [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
 
 
 def _get(url):
@@ -36,8 +34,3 @@ def parse_nikl(text):
             if key.strip() and alts:
                 out[key.strip()] = alts
     return out
-
-
-def found(term, text):
-    """앞이 한글·영문에 붙어 있지 않은 곳에서 term 이 나오는가 (뒤에는 조사가 붙을 수 있음)."""
-    return re.search(r"(?<![가-힣A-Za-z])" + re.escape(term), text) is not None
