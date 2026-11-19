@@ -33,7 +33,10 @@ class Simplifier:
     def _one(self, text, max_len=256):
         import numpy as np
 
-        ids = self.tok.encode(text, add_special_tokens=False).ids[: max_len - 1] + [EOS]
+        ids = self.tok.encode(text, add_special_tokens=False).ids
+        if len(ids) > max_len - 1:  # 255토큰 초과: 잘라서 바꾸면 뒷부분 정보가 사라지므로 원문 그대로
+            return text
+        ids = ids + [EOS]
         x = np.array([ids], dtype=np.int64)
         mask = np.ones_like(x)
         cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})  # 층별 cross K/V, 한 번만
