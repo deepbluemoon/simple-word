@@ -20,4 +20,4 @@ test = ["pytest", "httpx"]
 testpaths = ["tests"]
 
 [tool.setuptools]
-packages = ["simple_word", "api", "gate"]
+packages = ["simple_word", "api", "gate", "training"]
