@@ -34,4 +34,16 @@
 - docx·hwpx는 zip 안에 XML 문서가 들어 있는 형식이라 표준 라이브러리로 글자를 꺼낸다.
 - **압축 폭탄**: 작은 zip이 풀면 수 GB가 되도록 만든 파일. 풀린 크기 합계에 상한(20MB)을 둬서 막는다.
 - **이벤트 루프 막힘**: FastAPI의 `async` 함수 안에서 무거운 계산을 하면 그동안 다른 요청을 못 받는다. 무거운 작업은 `run_in_threadpool`로 별도 스레드에서 돌린다.
-- 해보기: `docker compose -p simpleword -f deploy/compose.yaml up -d --build` 후 http://localhost:8000 에서 txt·docx 파일 올리기. 끝나면 `docker compose -p simpleword -f deploy/compose.yaml down`.
+- 해보기: `HOST_PORT=18017 docker compose -p study-upload -f deploy/compose.yaml up -d --build` 후 http://localhost:18017 에서 txt·docx 파일을 올리고, `docker compose -p study-upload -f deploy/compose.yaml down`으로 정리한다.
+
+## 7. 학습·안전장치·협업
+- **Early stopping(조기 종료)**: train loss가 계속 낮아져도 valid loss가 나빠지면 과적합 신호다. T6 v1의 무작위 분할 valid loss는 `2.013 → 1.890 → 1.944 → 1.935 → … → 2.129`로 epoch 2에서 최저였다. 그 가중치를 복원하고 2 epoch 연속 개선이 없자 epoch 4에서 멈췄다.
+  - 해보기: `sed -n '45,57p' docs/T6_V1.md`로 epoch별 손실을 비교하고, 학습 데이터가 준비되어 있다면 `python -m training.train --version v1 --pairs data/pairs.jsonl --epochs 8`로 다시 학습한다.
+- **시간 누수와 데이터 누수**: 무작위 분할의 v1 test에는 train보다 이른 11-07 글이 포함돼 시간 순서를 거슬렀다. 문서 ID·원문·정규화 유사 문장·교사 출력·parity 입력이 train과 valid/test에 겹치는 데이터 누수는 별도로 검사했고 v1에서 모두 0건이었다. T6_V1 표에서 시간순 분할의 최저 valid loss는 1.890에서 2.211로 높아졌다.
+  - 해보기: `sed -n '59,87p' docs/T6_V1.md`로 비교·검사 표를 읽고, 데이터가 있으면 `python -m training.train --version v1 --pairs data/pairs.jsonl --split time --docs data/docs.jsonl --check-leakage`를 실행한다.
+- **폴백(fallback)은 숫자 안전장치**: `simple_word/numbers.py`가 숫자·날짜·금액·비율을 정규화해 원문과 모델 출력을 비교한다. 값이 달라지면 해당 문장만 원문으로 돌린다. v1 평가 72문장 중 5문장이 폴백되어 `fallback_rate`는 0.0694였고, 숫자 일치율은 1.0이 됐다.
+  - 해보기: `.venv/bin/python -m pytest -q tests/test_simplifier.py -k number_guard`와 `rg -n "fallback_rate" docs/T6_V1.md training/evaluate.py`를 실행한다.
+- **CI의 세 검사**: `.github/workflows/ci.yml`의 `docker`는 이미지 빌드, `dashboard`는 Node 22에서 대시보드 테스트와 coverage, `test`는 Python 3.11에서 pytest를 실행한다. 세 job 모두 통과해야 병합할 수 있다.
+  - 해보기: `gh run list --workflow CI --limit 5`로 실행을 찾고 `gh run view <RUN_ID>`로 세 job 결과를 확인한다.
+- **Squash 병합 뒤의 충돌**: squash는 PR의 여러 커밋을 새 단일 커밋으로 main에 넣는다. 원래 브랜치의 커밋은 main의 조상으로 기록되지 않으므로, 오래된 브랜치를 다시 main과 합치면 Git이 이미 반영된 패치를 또 적용하려다 충돌할 수 있다. 다음 작업은 최신 main에서 새 브랜치로 시작하고, 이전 브랜치에만 남은 변경이 있으면 그 커밋만 옮긴다.
+  - 해보기: `git log --oneline --graph --decorate --all -20`으로 그래프를 확인한 뒤 `git fetch origin && git switch -c codex/new-task origin/main`으로 새 브랜치를 만든다. 미병합 변경만 남았다면 `git cherry-pick <only-unmerged-commit>`을 실행한다.

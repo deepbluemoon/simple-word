@@ -27,3 +27,10 @@
 - RM `ops-dashboard/`를 가져온 뒤 RM 대응 액션·서비스 이름·운영 스크립트·컨테이너 실행 구성을 제거했다. 기존 RM 다크 모니터링 스타일을 유지하면서 AWS SSH Docker 조회, GCP Cloud Run/Monitoring/Logging 조회, 비용 탭을 추가했다.
 - 자격 증명이 없으면 클라우드는 `미연결`, 공시 가격 파일(`src/prices.json`) 기반 월 추정은 USD와 기본 환율 1,350 KRW/USD로 표시한다. AWS Cost Explorer와 GCP Billing Export 연결 시 실제 비용 데이터를 표시한다.
 - 서버는 `127.0.0.1`에 고정 바인딩한다. 검증: `node --test` 2 passed; `http://127.0.0.1:9760/api/health` 응답 확인, 양쪽 클라우드 미연결 표시 확인.
+
+## 2026-11-19 1차 v0.1 완료·2차 진행
+- 1차 기준은 `main`의 `33fe9b6` (`Port ops dashboard to Simple Word`, PR #27)이다. v0.1 범위의 수집·학습 v1·API·게이트·업로드·운영 대시보드가 main에 들어갔다.
+- v1은 숫자 안전장치로 `fallback_rate=0.0694`와 숫자 일치율 1.0을 기록했지만 길이 감소율 게이트는 통과하지 못해 champion으로 승격하지 않았다. 상세 표는 `docs/T6_V1.md`를 참고한다.
+- 2차 #28은 Claude Max가 백필 통과 짝 2,916건에서 원문보다 1.3배 넘게 긴 짝과 여러 줄 출력을 제외한 뒤 약 2,000건 이상으로 v2를 학습한다. early stopping·누수 검사·시간순 평가를 하고 게이트 통과 전에는 champion을 바꾸지 않는다.
+- #6은 codex2가 우선 로컬 배포를 검증한 다음 Lightsail·GCP·Route 53 배포를 진행한다. 실제 클라우드 검증에는 계정·도메인·버킷 준비가 필요하다.
+- #7의 200건 사람 검수 평가셋과 #8의 Claude Max 러너 토큰·자동 학습 준비는 사용자 입력을 기다린다.
