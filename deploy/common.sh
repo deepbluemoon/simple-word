@@ -6,14 +6,13 @@ COMPOSE_FILE="$DEPLOY_DIR/compose.yaml"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-simple-word}"
 DEPLOY_HOST="${DEPLOY_HOST:-127.0.0.1}"
 HOST_PORT="${HOST_PORT:-8000}"
-CANARY_PORT="${CANARY_PORT:-8001}"
 DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-${HOME}/.simple-word}"
 DEPLOY_STATE_FILE="${DEPLOY_STATE_FILE:-$DEPLOY_STATE_DIR/$(printf '%s' "$COMPOSE_PROJECT_NAME-$DEPLOY_HOST" | tr '/:@' '---').previous}"
 
 if [[ -n "${DEPLOY_USER:-}" && -z "${DOCKER_HOST:-}" ]]; then
     export DOCKER_HOST="ssh://${DEPLOY_USER}@${DEPLOY_HOST}"
 fi
-export COMPOSE_PROJECT_NAME HOST_PORT CANARY_PORT
+export COMPOSE_PROJECT_NAME HOST_PORT
 
 compose() {
     docker compose --project-name "$COMPOSE_PROJECT_NAME" --file "$COMPOSE_FILE" "$@"
@@ -21,7 +20,7 @@ compose() {
 
 current_image() {
     local container_id
-    container_id="$(compose ps --all --quiet api)"
+    container_id="$(compose ps --all --quiet api-1)"
     [[ -n "$container_id" ]] || return 1
     docker inspect --format '{{.Config.Image}}' "$container_id"
 }

@@ -1,55 +1,42 @@
-# 배포 사용법
+# 배포
 
-`deploy/compose.yaml`은 API 두 개(`api`, `canary`)와 트래픽 분배 프록시를 실행합니다. Docker Engine과 Compose v2가 필요합니다. 릴리스 이미지는 먼저 GHCR 같은 레지스트리에 올려야 합니다.
+## Lightsail
 
-## Lightsail 대상 설정
+Lightsail은 현재 champion만 실행한다. nginx 뒤에 같은 이미지와 모델을 쓰는 `api-1`, `api-2`가 있고, nginx가 두 upstream에 부하를 나눈다. 연결·타임아웃·502·503·504 실패는 다른 upstream으로 재시도한다. Lightsail에는 카나리, 섀도, 오토스케일링이 없다.
 
-배포를 실행하는 사용자 계정에 Lightsail 호스트의 SSH 공개키 로그인이 설정되어 있어야 합니다. 원격 호스트에는 Docker Engine/Compose 플러그인과 이미지 레지스트리 pull 권한을 준비합니다. 레지스트리 토큰은 원격 호스트의 Docker credential store 또는 비밀 관리 기능에 등록하고 저장소에 넣지 마세요.
+초기 구성과 로컬 실행:
 
 ```sh
-export DEPLOY_HOST=lightsail.example.com
-export DEPLOY_USER=ubuntu
-export HOST_PORT=8000
-export MODEL_DIR=/srv/simple-word/models
-export COMPOSE_PROJECT_NAME=simple-word
-deploy/deploy.sh ghcr.io/OWNER/simple-word:VERSION
+IMAGE=ghcr.io/OWNER/simple-word:VERSION docker compose -f deploy/compose.yaml up -d --build --wait api-1 api-2 proxy
 ```
 
-`DEPLOY_HOST`와 `DEPLOY_USER`는 SSH Docker endpoint(`ssh://user@host`)로 사용됩니다. `MODEL_DIR`은 Docker 호스트에 존재하는 모델 폴더이며 읽기 전용으로 마운트됩니다. 배포 상태 파일은 기본적으로 실행 사용자 홈의 `~/.simple-word/` 아래에 기록합니다. CI에서 실행한다면 `DEPLOY_STATE_FILE`을 지속 가능한 경로로 지정하세요.
+새 GCP champion 검증은 GCP Cloud Run의 카나리 리비전 비율과 섀도 트래픽에서 끝낸 뒤 Lightsail에 롤링 반영한다. 현재 태그는 `deploy/common.sh`의 프로젝트·호스트별 상태 파일에 기록하고 이전 태그는 `.previous` 파일에 보관한다.
 
-`deploy.sh <image:tag>`는 지정한 태그로 `api`를 교체하고 컨테이너 및 프록시 healthcheck를 기다립니다. 실패하면 배포 직전 실행 중이던 태그를 다시 올립니다. 성공하면 직전 태그를 상태 파일에 저장합니다.
+```sh
+deploy/rolling.sh ghcr.io/OWNER/simple-word:VERSION
+```
 
-API 이미지는 `frontend/`의 Vue 앱을 빌드해 `/app/frontend/dist`에 넣고 FastAPI가 함께 제공합니다. `/simplify`, `/feedback`, `/health`는 API로 처리하고, 그 밖의 프론트 화면 경로는 SPA 진입 파일로 되돌립니다. Nginx proxy는 모든 경로를 `api:8000`으로 전달하므로 새로 고침 경로도 그대로 동작합니다.
+롤링 스크립트는 (설정된 경우) `WEIGHT_HOOK`을 `up` 인자로 실행하고 `WEIGHT_HOOK_WAIT`초(기본 30초) 기다린다. 이어 `api-1`, `api-2`를 차례로 교체하며 각각 컨테이너 health와 프록시 smoke를 확인한다. 성공하면 훅을 `restore` 인자로 실행해 가중치를 기본 90/10으로 돌린다. 실패하면 이미 교체한 컨테이너를 각자의 기존 이미지로 되돌리고 가중치도 복귀시킨다.
+
+Route 53용 실행 파일은 아직 없다. 계정과 DNS 레코드에 맞춘 명령을 배포 호스트에서 `WEIGHT_HOOK`으로 지정한다. 예를 들면:
+
+```sh
+WEIGHT_HOOK='/usr/local/bin/set-route53-weight' WEIGHT_HOOK_WAIT=60 deploy/rolling.sh ghcr.io/OWNER/simple-word:VERSION
+```
+
+훅은 `up`이면 Lightsail/GCP 가중치를 임시 상향하고, `restore`이면 90/10으로 복구해야 한다. 훅 자체도 실패 코드를 반환해 배포를 중단시켜야 한다.
+
+이전 champion으로 전환:
 
 ```sh
 deploy/rollback.sh
 ```
 
-`rollback.sh`는 상태 파일의 직전 태그를 배포합니다. 되돌린 뒤 현재 태그를 상태 파일에 저장하므로 다시 실행하면 두 버전 사이를 전환할 수 있습니다.
+`deploy.sh <image:tag>`도 `rolling.sh`를 호출한다. 모든 명령은 `DEPLOY_USER`/`DEPLOY_HOST` 또는 Docker context로 원격 배포를 지정할 수 있다. Route 53 헬스체크는 Lightsail 또는 GCP의 상태가 나쁘면 해당 위치를 라우팅에서 제외하며, 가중치 변경은 위 훅에 둔다.
 
-## GHCR 이미지 태그
+## Cloud Run
 
-`.github/workflows/release.yml`은 `main` push와 `v*` 태그 push에서만 GHCR에 이미지를 push합니다. 모든 이미지에 `sha-<짧은 SHA>` 태그를 붙이고, main push에는 `main`, 버전 태그 push에는 `v1.2.3`처럼 원래 버전 태그도 붙입니다. PR 빌드는 기존 `ci.yml`의 Docker job에서 수행하며 이미지를 push하지 않습니다. 이 workflow에는 배포 단계가 없습니다.
-
-main의 특정 커밋을 Lightsail에 배포할 때는 짧은 SHA 태그를 전달합니다.
-
-```sh
-deploy/deploy.sh ghcr.io/deepbluemoon/simple-word:sha-1a2b3c4
-```
-
-이 명령은 앞의 Lightsail 환경 변수(`DEPLOY_HOST`, `DEPLOY_USER` 등)가 설정된 상태에서 사용합니다. GHCR 로그인 권한은 원격 호스트의 Docker credential store에 준비하고 비밀값은 저장소에 커밋하지 마세요.
-
-## Canary 배포
-
-```sh
-CANARY_PERCENT=10 \
-CANARY_SAMPLE_SIZE=100 \
-CANARY_SAMPLE_PATH=/ \
-MAX_ERROR_RATE=0.01 \
-deploy/canary.sh ghcr.io/OWNER/simple-word:VERSION
-```
-
-스크립트는 두 번째 `canary` 서비스를 띄워 healthcheck를 확인하고, 프록시의 요청 중 지정 비율을 canary로 보냅니다. `CANARY_SAMPLE_PATH`(기본 `/`)에 표본 요청을 보내 응답 헤더로 canary 요청 수와 오류율을 계산합니다. 최소 1개 canary 요청을 관측하고 canary 오류율이 `MAX_ERROR_RATE` 이하이면 새 태그를 `api`로 승격합니다. healthcheck, 표본 수, 오류율, 승격 healthcheck 중 하나라도 실패하면 트래픽을 안정 버전으로 돌리고 canary 서비스를 제거합니다.
+GCP Cloud Run은 API, 웹, 모델/스토리지의 3티어다. 서비스는 1 GiB 메모리, 최소 인스턴스 1, 최대 3으로 운용한다. 새 모델은 Cloud Run 리비전 비율 카나리와 champion에 대한 섀도 평가를 거쳐 GCP champion이 된다. Lightsail 롤링 중에는 DNS 가중치를 일시 조정할 수 있고, 작업이 끝나면 기본 Lightsail 90 / GCP 10으로 복귀한다. 장애 조치에서는 Route 53 헬스체크가 살아 있는 쪽으로 트래픽을 보낸다.
 
 ## 로컬 검증
 
@@ -57,11 +44,4 @@ deploy/canary.sh ghcr.io/OWNER/simple-word:VERSION
 bash deploy/test-local.sh
 ```
 
-검증 스크립트는 매번 고유한 Compose 프로젝트명을 사용하고, 사용 가능한 임의 포트를 골라 실행합니다. 성공 배포와 실패 배포의 자동 복구, 실패 canary 철회, 정상 승격, 실패한 명시적 롤백의 복구와 정상 롤백을 확인한 뒤 임시 프로젝트와 이미지, 볼륨을 정리합니다.
-
-## 아직 클라우드가 필요한 작업
-
-- GitHub Actions에서 이미지를 빌드해 GHCR 및 Artifact Registry에 올리고, Lightsail 배포와 GCP Cloud Run 배포에 Workload Identity를 연결하는 작업
-- Route 53 헬스체크와 장애 조치 레코드 설정
-- Lightsail 객체 스토리지, GCP 프로젝트 및 결제 계정, 도메인/호스팅 영역 준비
-- 실제 장애 훈련을 수행하고 AWS↔GCP 전환 시간을 측정하는 작업
+이 테스트는 별도 Compose 프로젝트와 `simple-word:qa-codex` 이미지로 두 API를 띄운다. 롤링 도중 연속 health 요청에 5xx가 없는지, 잘못된 이미지 배포 뒤 교체한 컨테이너가 기존 태그로 복구되는지 확인한다. 18016 nightly 서비스, `simple-word:local` 이미지는 사용하지 않는다.
