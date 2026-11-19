@@ -9,6 +9,13 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      MAX_CONCURRENT_SIMPLIFY: "2"
+      LOAD_REQUESTS: "30"
+      LOAD_MAX_P95_MS: "5000"
+      BURST_REQUESTS: "30"
+      BURST_CONCURRENCY: "10"
+      BURST_MIN_429_RATE: "0.01"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,4 +40,5 @@ jobs:
           trap cleanup EXIT
           docker compose -p "$project" -f deploy/compose.yaml up -d --build --wait --wait-timeout 180 api proxy
           python scripts/smoke.py http://127.0.0.1:18016
-          python scripts/load.py --url http://127.0.0.1:18016/simplify --requests 30 --concurrency 10 --max-p95-ms 5000 --max-429-rate 0.5
+          python scripts/load.py --url http://127.0.0.1:18016/simplify --requests "$LOAD_REQUESTS" --concurrency "$MAX_CONCURRENT_SIMPLIFY" --max-p95-ms "$LOAD_MAX_P95_MS" --max-429-rate 0
+          python scripts/load.py --url http://127.0.0.1:18016/simplify --requests "$BURST_REQUESTS" --concurrency "$BURST_CONCURRENCY" --min-429-rate "$BURST_MIN_429_RATE"
