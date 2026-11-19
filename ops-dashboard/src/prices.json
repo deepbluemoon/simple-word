@@ -1,0 +1,21 @@
+{
+  "checkedAt": "2026-11-19",
+  "assumptions": "USD monthly list-price estimate before free-tier credits, taxes, network transfer, API requests, and usage overages. Lightsail instance is 2 vCPU/2 GB; AWS bucket is the $1 starter bundle; one public hosted zone and one AWS-endpoint health check; Cloud Run is one idle 1-vCPU/0.5-GiB minimum instance for 730 hours; Artifact Registry stores 1 GiB (first 0.5 GiB free); Cloud Storage stores 5 GiB in a US region.",
+  "sources": [
+    "https://aws.amazon.com/lightsail/pricing/",
+    "https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-faq-buckets.html",
+    "https://aws.amazon.com/route53/pricing/",
+    "https://cloud.google.com/run/pricing",
+    "https://cloud.google.com/artifact-registry/pricing",
+    "https://cloud.google.com/storage/pricing"
+  ],
+  "items": [
+    { "cloud": "aws", "service": "Lightsail 인스턴스 (2 vCPU, 2 GB)", "usd": 22.00 },
+    { "cloud": "aws", "service": "Lightsail 객체 스토리지 (5 GB 번들)", "usd": 1.00 },
+    { "cloud": "aws", "service": "Route 53 호스팅 존 1개", "usd": 0.50 },
+    { "cloud": "aws", "service": "Route 53 헬스체크 1개", "usd": 0.50 },
+    { "cloud": "gcp", "service": "Cloud Run 최소 1대 (유휴, 1 vCPU/0.5 GiB)", "usd": 9.86 },
+    { "cloud": "gcp", "service": "Artifact Registry (1 GiB, 무료 0.5 GiB 차감 후)", "usd": 0.05 },
+    { "cloud": "gcp", "service": "Cloud Storage Standard (5 GiB, us-central1)", "usd": 0.10 }
+  ]
+}

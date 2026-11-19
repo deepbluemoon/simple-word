@@ -21,3 +21,9 @@
 - parity 행 스키마는 `{"input": "문장" 또는 ["문장"], "output": "결과" 또는 ["결과"]}`. 지표 키와 수치는 `gate/thresholds.json` 기준으로 metadata `metrics`에 맞춘다.
 - 검증: pytest 23 passed. Compose에서 파일을 바꿔 `hot-a`→`hot-b`가 컨테이너 재시작 없이 `/health`와 `/simplify`에 반영됨을 확인했다.
 - 리뷰 #3: 명시된 `dummy` 외 registry 버전은 metadata/ONNX 파일과 모델 로딩을 확인하고 실패 시 경고하며 기존 라우팅을 유지한다. 추론 실패는 role/version/error를 요청 로그에 남기고 500을 반환한다. 메인 슬롯은 추론 직후 반환하고 shadow는 별도 1슬롯 semaphore에서 바쁘면 생략 로그를 남긴다. pytest 27 passed.
+
+## 2026-11-19 Codex T9
+- 화면 이슈 #4: 업로드 UI를 흰 바탕·잉크색·시스템 산세리프·알약형 기본 버튼으로 조정하고 모바일 문장 열 재배치와 포커스 표시를 유지했다. 커밋 `1ceaa40` (`Refs #4`).
+- RM `ops-dashboard/`를 가져온 뒤 RM 대응 액션·서비스 이름·운영 스크립트·컨테이너 실행 구성을 제거했다. 기존 RM 다크 모니터링 스타일을 유지하면서 AWS SSH Docker 조회, GCP Cloud Run/Monitoring/Logging 조회, 비용 탭을 추가했다.
+- 자격 증명이 없으면 클라우드는 `미연결`, 공시 가격 파일(`src/prices.json`) 기반 월 추정은 USD와 기본 환율 1,350 KRW/USD로 표시한다. AWS Cost Explorer와 GCP Billing Export 연결 시 실제 비용 데이터를 표시한다.
+- 서버는 `127.0.0.1`에 고정 바인딩한다. 검증: `node --test` 2 passed; `http://127.0.0.1:9760/api/health` 응답 확인, 양쪽 클라우드 미연결 표시 확인.
