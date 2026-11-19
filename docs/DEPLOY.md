@@ -19,6 +19,8 @@ deploy/deploy.sh ghcr.io/OWNER/simple-word:VERSION
 
 `deploy.sh <image:tag>`는 지정한 태그로 `api`를 교체하고 컨테이너 및 프록시 healthcheck를 기다립니다. 실패하면 배포 직전 실행 중이던 태그를 다시 올립니다. 성공하면 직전 태그를 상태 파일에 저장합니다.
 
+API 이미지는 `frontend/`의 Vue 앱을 빌드해 `/app/frontend/dist`에 넣고 FastAPI가 함께 제공합니다. `/simplify`, `/feedback`, `/health`는 API로 처리하고, 그 밖의 프론트 화면 경로는 SPA 진입 파일로 되돌립니다. Nginx proxy는 모든 경로를 `api:8000`으로 전달하므로 새로 고침 경로도 그대로 동작합니다.
+
 ```sh
 deploy/rollback.sh
 ```

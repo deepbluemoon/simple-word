@@ -289,11 +289,22 @@ def test_dockerfile_runs_non_root_and_prepares_logs():
     assert "USER app" in dockerfile
 
 
-def test_root_serves_upload_page():
-    response = client.get("/")
+def test_root_and_spa_routes_serve_built_frontend(monkeypatch, tmp_path):
+    from pathlib import Path
 
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<main>쉬운 말로 바꾸기</main>", encoding="utf-8")
+    (dist / "assets").mkdir()
+    (dist / "assets" / "app.js").write_text("export {}", encoding="utf-8")
+    monkeypatch.setattr(api_main, "FRONTEND_DIST", dist)
+
+    response = client.get("/")
     assert response.status_code == 200
     assert "쉬운 말로 바꾸기" in response.text
+    assert client.get("/results/example").text == response.text
+    assert client.get("/assets/app.js").text == "export {}"
+    assert client.get("/assets/missing.js").status_code == 404
 
 
 def test_request_log_marks_number_fallback_per_sentence(monkeypatch, tmp_path):
