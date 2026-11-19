@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import threading
 from pathlib import Path
 
@@ -32,8 +33,10 @@ class ModelRouter:
             if not self._valid_version(champion) or any(
                 value is not None and not self._valid_version(value) for value in (canary, shadow)
             ):
+                logging.warning("Rejecting model registry %s: invalid model version", self.registry_path)
                 return
             if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not 0 <= weight <= 1:
+                logging.warning("Rejecting model registry %s: invalid canary_weight", self.registry_path)
                 return
             registry = {"champion": champion, "canary": canary, "canary_weight": weight, "shadow": shadow}
         except FileNotFoundError:
@@ -46,12 +49,23 @@ class ModelRouter:
             if signature == self.signature:
                 return
             versions = {v for v in (registry["champion"], registry["canary"], registry["shadow"]) if v}
+            for version in versions:
+                if version != "dummy":
+                    artifact = self.models_dir / version
+                    if not (artifact / "metadata.json").is_file() and not (artifact / "encoder.onnx").is_file():
+                        logging.warning(
+                            "Rejecting model registry %s: version %s has no metadata.json or encoder.onnx",
+                            self.registry_path,
+                            version,
+                        )
+                        return
             try:
                 models = {
                     version: self.models.get(version) or Simplifier(str(self.models_dir / version))
                     for version in versions
                 }
-            except Exception:
+            except Exception as exc:
+                logging.warning("Could not load model registry %s: %s", self.registry_path, exc)
                 return
             self.registry = registry
             self.models = models
@@ -61,6 +75,8 @@ class ModelRouter:
         self.reload_if_changed()
         with self.lock:
             registry, models = self.registry, self.models
+            if not registry:
+                raise RuntimeError(f"No valid model registry at {self.registry_path}")
             role = "champion"
             version = registry["champion"]
             canary = registry["canary"]

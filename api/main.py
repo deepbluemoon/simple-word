@@ -26,6 +26,7 @@ MAX_UNPACKED_BYTES = 20 * 1024 * 1024
 MAX_PDF_PAGES = 50
 MAX_SENTENCES = 500
 SIMPLIFY_SLOTS = threading.BoundedSemaphore(int(os.getenv("MAX_CONCURRENT_SIMPLIFY", "2")))
+SHADOW_SLOTS = threading.BoundedSemaphore(1)
 feedback_lock = threading.Lock()
 request_log_lock = threading.Lock()
 PII_PATTERNS = (
@@ -104,7 +105,15 @@ def redact(text: str) -> str:
     return text
 
 
-def log_request(request_id: str, role: str, version: str, sentences: list[str], outputs: list[str], started: float) -> None:
+def log_request(
+    request_id: str,
+    role: str,
+    version: str,
+    sentences: list[str],
+    outputs: list[str],
+    started: float,
+    error: str | None = None,
+) -> None:
     record = {
         "request_id": request_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -117,6 +126,8 @@ def log_request(request_id: str, role: str, version: str, sentences: list[str], 
             for original, simple in zip(sentences, outputs)
         ],
     }
+    if error:
+        record["error"] = error
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     with request_log_lock, (LOG_DIR / "requests.jsonl").open("a", encoding="utf-8") as log:
         log.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -129,7 +140,11 @@ def simplify_content(filename: str, data: bytes, request_id: str):
     sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+|\n+", text) if part.strip()]
     if len(sentences) > MAX_SENTENCES:
         raise HTTPException(status_code=400, detail="Document exceeds 500-sentence limit")
-    simplified = model.simplify(sentences)
+    try:
+        simplified = model.simplify(sentences)
+    except Exception as exc:
+        log_request(request_id, role, version, sentences, [], started, type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Model inference failed") from exc
     log_request(request_id, role, version, sentences, simplified, started)
     payload = {
         "model_version": version,
@@ -143,29 +158,24 @@ def simplify_content(filename: str, data: bytes, request_id: str):
 
 def run_shadow(request_id: str, version: str, model, sentences: list[str]) -> None:
     started = time.perf_counter()
+    if not SHADOW_SLOTS.acquire(blocking=False):
+        log_request(request_id, "shadow", version, sentences, [], started, "shadow_busy")
+        return
     try:
-        output = model.simplify(sentences)
-    except Exception:
-        output = []
-    log_request(request_id, "shadow", version, sentences, output, started)
-
-
-def release_simplify_slot() -> None:
-    SIMPLIFY_SLOTS.release()
-
-
-def run_shadow_and_release(request_id: str, version: str, model, sentences: list[str]) -> None:
-    try:
-        run_shadow(request_id, version, model, sentences)
+        try:
+            output = model.simplify(sentences)
+        except Exception as exc:
+            log_request(request_id, "shadow", version, sentences, [], started, type(exc).__name__)
+        else:
+            log_request(request_id, "shadow", version, sentences, output, started)
     finally:
-        release_simplify_slot()
+        SHADOW_SLOTS.release()
 
 
 @app.post("/simplify")
 async def simplify(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> dict:
     if not SIMPLIFY_SLOTS.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="Server is busy; retry shortly", headers={"Retry-After": "1"})
-    release_deferred = False
     try:
         if not file.filename or Path(file.filename).suffix.lower() not in {".txt", ".docx", ".hwpx", ".pdf"}:
             raise HTTPException(status_code=400, detail="Supported files: .txt, .docx, .hwpx, .pdf")
@@ -179,14 +189,10 @@ async def simplify(background_tasks: BackgroundTasks, file: UploadFile = File(..
             simplify_content, file.filename, data, request_id
         )
         if shadow_model is not None:
-            background_tasks.add_task(run_shadow_and_release, request_id, shadow_version, shadow_model, sentences)
-        else:
-            background_tasks.add_task(release_simplify_slot)
-        release_deferred = True
+            background_tasks.add_task(run_shadow, request_id, shadow_version, shadow_model, sentences)
         return payload
     finally:
-        if not release_deferred:
-            SIMPLIFY_SLOTS.release()
+        SIMPLIFY_SLOTS.release()
 
 
 @app.post("/feedback")

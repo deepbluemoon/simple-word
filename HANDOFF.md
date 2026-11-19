@@ -20,3 +20,4 @@
 - `codex/t7-router-gate`에 registry 기반 champion/canary/shadow 라우터, 비동기 threadpool 추론·요청 부하 제한, PII 가림 요청 JSONL, parity/metric gate와 모델 리포트 생성을 추가했다.
 - parity 행 스키마는 `{"input": "문장" 또는 ["문장"], "output": "결과" 또는 ["결과"]}`. 지표 키와 수치는 `gate/thresholds.json` 기준으로 metadata `metrics`에 맞춘다.
 - 검증: pytest 23 passed. Compose에서 파일을 바꿔 `hot-a`→`hot-b`가 컨테이너 재시작 없이 `/health`와 `/simplify`에 반영됨을 확인했다.
+- 리뷰 #3: 명시된 `dummy` 외 registry 버전은 metadata/ONNX 파일과 모델 로딩을 확인하고 실패 시 경고하며 기존 라우팅을 유지한다. 추론 실패는 role/version/error를 요청 로그에 남기고 500을 반환한다. 메인 슬롯은 추론 직후 반환하고 shadow는 별도 1슬롯 semaphore에서 바쁘면 생략 로그를 남긴다. pytest 27 passed.

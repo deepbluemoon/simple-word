@@ -171,6 +171,10 @@ def test_simplify_returns_429_and_retry_after_when_at_capacity():
 def test_router_shadow_logs_selected_versions_and_redacts_pii(tmp_path, monkeypatch):
     registry = tmp_path / "models" / "registry.json"
     registry.parent.mkdir()
+    for version in ("v1", "v2", "v3"):
+        artifact = registry.parent / version
+        artifact.mkdir()
+        (artifact / "metadata.json").touch()
     registry.write_text(json.dumps({
         "champion": "v1", "canary": "v2", "canary_weight": 1, "shadow": "v3",
     }))
@@ -187,6 +191,65 @@ def test_router_shadow_logs_selected_versions_and_redacts_pii(tmp_path, monkeypa
     serialized = json.dumps(records, ensure_ascii=False)
     assert "[전화번호]" in serialized and "[이메일]" in serialized and "[주민번호]" in serialized
     assert "010-1234-5678" not in serialized and "a.person@example.org" not in serialized
+
+
+def test_inference_error_returns_500_logs_role_and_releases_slot(monkeypatch, tmp_path):
+    class BrokenModel:
+        def simplify(self, sentences):
+            raise RuntimeError("inference failed")
+
+    class BrokenRouter:
+        def select(self, request_id):
+            return "v-broken", "canary", BrokenModel(), None, None
+
+    monkeypatch.setattr(api_main, "router", BrokenRouter())
+    monkeypatch.setattr(api_main, "SIMPLIFY_SLOTS", threading.BoundedSemaphore(1))
+
+    response = client.post("/simplify", files={"file": ("fail.txt", "입력 문장")})
+    record = json.loads((tmp_path / "requests.jsonl").read_text().splitlines()[0])
+
+    assert response.status_code == 500
+    assert record["role"] == "canary" and record["model_version"] == "v-broken"
+    assert record["error"] == "RuntimeError"
+    assert api_main.SIMPLIFY_SLOTS.acquire(blocking=False)
+    api_main.SIMPLIFY_SLOTS.release()
+
+
+def test_busy_shadow_is_skipped_and_logged(monkeypatch, tmp_path):
+    class MustNotRun:
+        def simplify(self, sentences):
+            raise AssertionError("busy shadow should not run")
+
+    shadow_slots = threading.BoundedSemaphore(1)
+    shadow_slots.acquire()
+    monkeypatch.setattr(api_main, "SHADOW_SLOTS", shadow_slots)
+    try:
+        api_main.run_shadow("request-1", "v-shadow", MustNotRun(), ["문장"])
+    finally:
+        shadow_slots.release()
+
+    record = json.loads((tmp_path / "requests.jsonl").read_text().splitlines()[0])
+    assert record["role"] == "shadow" and record["model_version"] == "v-shadow"
+    assert record["error"] == "shadow_busy"
+
+
+def test_main_slot_is_released_even_if_background_task_never_runs(tmp_path, monkeypatch):
+    registry = tmp_path / "models" / "registry.json"
+    registry.parent.mkdir()
+    artifact = registry.parent / "v-shadow"
+    artifact.mkdir()
+    (artifact / "metadata.json").touch()
+    registry.write_text(json.dumps({"champion": "dummy", "shadow": "v-shadow"}))
+    monkeypatch.setattr(api_main, "router", ModelRouter(registry))
+    slots = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(api_main, "SIMPLIFY_SLOTS", slots)
+    monkeypatch.setattr("fastapi.BackgroundTasks.add_task", lambda *args, **kwargs: None)
+
+    response = client.post("/simplify", files={"file": ("notice.txt", "한 문장")})
+
+    assert response.status_code == 200
+    assert slots.acquire(blocking=False)
+    slots.release()
 
 
 def test_feedback_appends_jsonl(tmp_path, monkeypatch):
