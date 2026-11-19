@@ -4,12 +4,13 @@ services:
       context: ..
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "${HOST_PORT:-8000}:8000"
     volumes:
-      - ../models:/app/models:ro
+      - ${MODEL_DIR:-../models}:/app/models:ro
       - logs:/app/logs
     environment:
       LOG_DIR: /app/logs
+      MAX_CONCURRENT_SIMPLIFY: ${MAX_CONCURRENT_SIMPLIFY:-2}
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8000/health')"]
       interval: 10s
