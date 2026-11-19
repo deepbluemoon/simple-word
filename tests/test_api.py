@@ -1,4 +1,5 @@
 import io
+import threading
 import zipfile
 
 from pypdf import PdfWriter
@@ -86,6 +87,67 @@ def test_simplify_rejects_empty_and_oversized_files():
     assert "5 mb" in oversized.json()["detail"].lower()
 
 
+def test_simplify_rejects_zip_with_large_unpacked_size(monkeypatch):
+    document = zipped_file({"word/document.xml": "tiny"})
+    original_getinfo = zipfile.ZipFile.getinfo
+
+    def report_large_size(archive, name):
+        info = original_getinfo(archive, name)
+        if name == "word/document.xml":
+            info.file_size = 20 * 1024 * 1024 + 1
+        return info
+
+    monkeypatch.setattr(zipfile.ZipFile, "getinfo", report_large_size)
+    response = client.post("/simplify", files={"file": ("bomb.docx", document)})
+
+    assert response.status_code == 400
+    assert "unpacked" in response.json()["detail"].lower()
+
+
+def test_simplify_rejects_pdf_over_page_limit():
+    buffer = io.BytesIO()
+    writer = PdfWriter()
+    for _ in range(51):
+        writer.add_blank_page(width=200, height=200)
+    writer.write(buffer)
+
+    response = client.post("/simplify", files={"file": ("many.pdf", buffer.getvalue())})
+
+    assert response.status_code == 400
+    assert "50-page" in response.json()["detail"]
+
+
+def test_simplify_rejects_more_than_500_sentences():
+    content = "\n".join(["문장"] * 501)
+
+    response = client.post("/simplify", files={"file": ("many.txt", content)})
+
+    assert response.status_code == 400
+    assert "500-sentence" in response.json()["detail"]
+
+
+def test_simplify_runs_extraction_and_model_in_threadpool(monkeypatch):
+    import api.main as api_main
+
+    event_loop_threads = []
+    worker_threads = []
+    original_run_in_threadpool = api_main.run_in_threadpool
+
+    def record_worker(filename, data):
+        worker_threads.append(threading.get_ident())
+        return api_main.simplify_content(filename, data)
+
+    async def track_threadpool(func, *args):
+        event_loop_threads.append(threading.get_ident())
+        return await original_run_in_threadpool(record_worker, *args)
+
+    monkeypatch.setattr(api_main, "run_in_threadpool", track_threadpool)
+    response = client.post("/simplify", files={"file": ("short.txt", "text")})
+
+    assert response.status_code == 200
+    assert worker_threads and worker_threads[0] != event_loop_threads[0]
+
+
 def test_feedback_appends_jsonl(tmp_path, monkeypatch):
     monkeypatch.setattr("api.main.LOG_DIR", tmp_path)
 
@@ -95,6 +157,21 @@ def test_feedback_appends_jsonl(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert (tmp_path / "feedback.jsonl").read_text(encoding="utf-8") == '{"model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up"}\n'
+
+
+def test_feedback_rejects_strings_over_2000_characters():
+    response = client.post("/feedback", json={
+        "model_version": "v1", "original": "x" * 2001, "simple": "쉬운 말", "vote": "up",
+    })
+
+    assert response.status_code == 422
+
+
+def test_dockerfile_runs_non_root_and_prepares_logs():
+    dockerfile = open("Dockerfile", encoding="utf-8").read()
+
+    assert "chown app:app /app/logs" in dockerfile
+    assert "USER app" in dockerfile
 
 
 def test_root_serves_upload_page():
