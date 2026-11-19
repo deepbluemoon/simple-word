@@ -13,16 +13,20 @@
 
 ## 작업
 
+작업의 기준은 GitHub Issues다(https://github.com/deepbluemoon/simple-word/issues). 아래 표는 요약이고, 규칙은 `docs/BRANCHING.md`.
+
 | ID | 작업 | 담당 | 상태 |
 |---|---|---|---|
 | T1 | 아키텍처·모듈 경계·인터페이스 정의 (`docs/ARCHITECTURE.md`) | 총괄 | done |
 | T2 | 데이터 조사 (`docs/DATA_RESEARCH.md`, 브랜치 `max/t2-data-research`) | Claude Max | done |
 | T3 | Lightsail 사양 확인 | 총괄 | done |
 | T4 | 저장소 골격, 테스트 실행 CI | Codex | done |
-| T5 | 수집기(크론)·과거 글 채우기·전처리·교사 짝 생성·자동 검사, 50건 배치로 통과율 측정 | Claude Max | doing |
-| T6 | 학생 모델 학습(KoBART 전체 파인튜닝, 미달 시에만 Qwen3-0.6B LoRA), ONNX INT8, 실제 `Simplifier` | Claude Max | doing (준비) |
-| T7 | 라우터(champion·canary·shadow, registry 다시 읽기), 부하 차단, 게이트·parity, `reports/` 기록 | Codex | doing |
+| T5 (#1) | 수집기(크론)·과거 글 채우기·전처리·교사 짝 생성·자동 검사, 50건 배치로 통과율 측정 | Claude Max | doing |
+| T6 (#2) | 학생 모델 학습(KoBART 전체 파인튜닝, 미달 시에만 Qwen3-0.6B LoRA), ONNX INT8, 실제 `Simplifier` | Claude Max | doing (준비) |
+| T7 (#3) | 라우터(champion·canary·shadow, registry 다시 읽기), 부하 차단, 게이트·parity, `reports/` 기록 | Codex | doing |
 | T8 | 업로드 웹 화면, Dockerfile·docker compose로 로컬 전체 실행 | Codex | done |
-| T9 | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS(SSH Docker)·GCP(Cloud Monitoring) 둘 다 감시 | Codex | done |
-| T10 | Lightsail·GCP·Route 53 배포와 장애 조치 | Codex + 사용자(계정·도메인) | todo |
-| T11 | 평가셋 200건 사람 검수 | 사용자 | todo |
+| T9 (#5) | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS·GCP 감시 + 비용 | codex2 | done |
+| T10 (#6) | Lightsail·GCP·Route 53 배포와 장애 조치 | Codex + 사용자(계정·도메인) | todo |
+| T11 (#7) | 평가셋 200건 사람 검수 | 사용자 | todo |
+| T8b (#4) | 서비스 화면 Airtable 팔레트 | codex2 | done |
+| T12 (#8) | 셀프호스티드 러너, 수집·누적 학습 워크플로 | 총괄 + 사용자 | todo |
