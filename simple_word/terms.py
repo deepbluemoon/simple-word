@@ -11,7 +11,7 @@ def preserve_terms(path=Path(__file__).with_name("preserve_terms.txt")):
 
 def found(term, text):
     """앞이 한글·영문에 붙어 있지 않은 곳에서 term 이 나오는가 (뒤에는 조사가 붙을 수 있음)."""
-    return re.search(r"(?<![가-힣A-Za-z])" + re.escape(term), text) is not None
+    return term in text and re.search(r"(?<![가-힣A-Za-z])" + re.escape(term), text) is not None
 
 
 def missing_terms(src, out, terms):
