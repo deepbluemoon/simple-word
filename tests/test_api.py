@@ -17,6 +17,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def isolated_request_logs(tmp_path, monkeypatch):
     monkeypatch.setattr(api_main, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(api_main, "router", ModelRouter(tmp_path / "models" / "registry.json"))
 
 
 def test_health_reports_loaded_model_version():
