@@ -18,7 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest", "httpx"]
-train = ["torch", "transformers", "onnx"]
+train = ["torch", "transformers", "onnx", "bert-score"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

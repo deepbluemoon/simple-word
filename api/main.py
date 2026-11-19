@@ -114,6 +114,7 @@ def log_request(
     outputs: list[str],
     started: float,
     error: str | None = None,
+    fallbacks: list[bool] | None = None,
 ) -> None:
     record = {
         "request_id": request_id,
@@ -123,8 +124,8 @@ def log_request(
         "sentence_count": len(sentences),
         "latency_ms": round((time.perf_counter() - started) * 1000, 2),
         "sentences": [
-            {"original": redact(original), "simple": redact(simple)}
-            for original, simple in zip(sentences, outputs)
+            {"original": redact(original), "simple": redact(simple), "fallback": fallback}
+            for original, simple, fallback in zip(sentences, outputs, fallbacks or [False] * len(outputs))
         ],
     }
     if error:
@@ -132,6 +133,16 @@ def log_request(
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     with request_log_lock, (LOG_DIR / "requests.jsonl").open("a", encoding="utf-8") as log:
         log.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def run_model(model, sentences: list[str]) -> tuple[list[str], list[bool]]:
+    """(출력, 문장별 숫자 안전장치 fallback 여부). simplify_detailed 가 없는 모델은 fallback 없음으로 본다."""
+    detailed = getattr(model, "simplify_detailed", None)
+    if detailed is None:
+        outputs = model.simplify(sentences)
+        return outputs, [False] * len(outputs)
+    pairs = detailed(sentences)
+    return [text for text, _ in pairs], [fallback for _, fallback in pairs]
 
 
 def simplify_content(filename: str, data: bytes, request_id: str):
@@ -142,11 +153,11 @@ def simplify_content(filename: str, data: bytes, request_id: str):
     if len(sentences) > MAX_SENTENCES:
         raise HTTPException(status_code=400, detail=f"Document exceeds {MAX_SENTENCES}-sentence limit")
     try:
-        simplified = model.simplify(sentences)
+        simplified, fallbacks = run_model(model, sentences)
     except Exception as exc:
         log_request(request_id, role, version, sentences, [], started, type(exc).__name__)
         raise HTTPException(status_code=500, detail="Model inference failed") from exc
-    log_request(request_id, role, version, sentences, simplified, started)
+    log_request(request_id, role, version, sentences, simplified, started, fallbacks=fallbacks)
     payload = {
         "model_version": version,
         "sentences": [
@@ -164,11 +175,11 @@ def run_shadow(request_id: str, version: str, model, sentences: list[str]) -> No
         return
     try:
         try:
-            output = model.simplify(sentences)
+            output, fallbacks = run_model(model, sentences)
         except Exception as exc:
             log_request(request_id, "shadow", version, sentences, [], started, type(exc).__name__)
         else:
-            log_request(request_id, "shadow", version, sentences, output, started)
+            log_request(request_id, "shadow", version, sentences, output, started, fallbacks=fallbacks)
     finally:
         SHADOW_SLOTS.release()
 

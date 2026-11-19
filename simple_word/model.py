@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from simple_word.numbers import numbers
+
 EOS = 1  # KoBART: bos = eos = decoder_start = 1
 
 
@@ -7,6 +9,8 @@ class Simplifier:
     """models/<version>/ 의 ONNX(INT8)를 onnxruntime(CPU)으로 불러 탐욕 디코딩(결정적, self-attention KV 캐시).
 
     artifact_dir 에 encoder.onnx 가 없을 때만 입력을 그대로 돌려주는 더미로 동작한다.
+    숫자 안전장치: 출력의 숫자·날짜·금액·비율이 원문과 다르면(100분의 20 = 20% 는 같음) 그 문장은 원문을 돌려준다.
+    255토큰을 넘는 입력도 원문을 돌려준다. 둘 다 fallback 으로 표시한다.
     """
 
     def __init__(self, artifact_dir: str):
@@ -26,14 +30,25 @@ class Simplifier:
         self.tok.no_truncation()
 
     def simplify(self, sentences: list[str]) -> list[str]:
+        return [text for text, _ in self.simplify_detailed(sentences)]
+
+    def simplify_detailed(self, sentences: list[str]) -> list[tuple[str, bool]]:
+        """[(출력, 원문으로 대체했는지)]. 상태를 인스턴스에 남기지 않아 여러 스레드가 같이 써도 된다."""
         if self.dummy:
-            return list(sentences)
-        return [self._one(s) for s in sentences]
+            return [(s, False) for s in sentences]
+        out = []
+        for s in sentences:
+            y = self._one(s)
+            out.append((s, True) if y is None or numbers(y) != numbers(s) else (y, False))
+        return out
 
     def _one(self, text, max_len=256):
         import numpy as np
 
-        ids = self.tok.encode(text, add_special_tokens=False).ids[: max_len - 1] + [EOS]
+        ids = self.tok.encode(text, add_special_tokens=False).ids
+        if len(ids) > max_len - 1:  # 255토큰 초과: 잘라서 바꾸면 뒷부분 정보가 사라지므로 원문 그대로
+            return None
+        ids = ids + [EOS]
         x = np.array([ids], dtype=np.int64)
         mask = np.ones_like(x)
         cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})  # 층별 cross K/V, 한 번만

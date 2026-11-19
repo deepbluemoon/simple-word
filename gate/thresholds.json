@@ -3,6 +3,10 @@
     "number_date_amount_match_rate": 1.0,
     "preserved_terms_retention_rate": 1.0
   },
+  "first_champion": {
+    "bert_score": 0.75,
+    "sentence_length_reduction_rate": -0.10
+  },
   "at_least_champion": [
     "bert_score",
     "sentence_length_reduction_rate"
