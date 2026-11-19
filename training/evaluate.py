@@ -40,14 +40,17 @@ def sari(src, out, ref):
 
 def text_metrics(srcs, outs, refs, preserve, nikl):
     keep_terms = [(t, o) for s, o in zip(srcs, outs) for t in preserve if found(t, s)]
-    hard = [(t, o) for s, o in zip(srcs, outs) for t in nikl if len(t) >= 2 and found(t, s)]
+    hard = [(t, o) for s, o in zip(srcs, outs) for t in nikl if found(t, s)]
+    by_source = collections.Counter(source for s in srcs for term, entry in nikl.items() if found(term, s)
+                                    for source in entry["sources"])
     return {
         "number_date_amount_match_rate": round(sum(numbers(s) == numbers(o) for s, o in zip(srcs, outs)) / len(srcs), 4),
         "preserved_terms_retention_rate": round(sum(t in o for t, o in keep_terms) / len(keep_terms), 4) if keep_terms else 1.0,
         "difficult_term_retention_rate": round(sum(found(t, o) for t, o in hard) / len(hard), 4) if hard else 0.0,
         "sentence_length_reduction_rate": round(1 - sum(map(len, outs)) / sum(map(len, srcs)), 4),
         "sari": round(statistics.mean(sari(s, o, r) for s, o, r in zip(srcs, outs, refs)), 4),
-        "counts": {"sentences": len(srcs), "preserved_terms": len(keep_terms), "difficult_terms": len(hard)},
+        "counts": {"sentences": len(srcs), "preserved_terms": len(keep_terms), "difficult_terms": len(hard),
+                   "difficult_terms_by_source": dict(sorted(by_source.items()))},
     }
 
 

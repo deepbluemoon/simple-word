@@ -86,7 +86,7 @@ def sample(rows, quotas=QUOTAS, seed=SEED):
 
 
 def candidates(a):
-    nikl = tuple(t for t in nikl_dict(a.data_dir) if len(t) >= 2)
+    nikl = nikl_dict(a.data_dir)
     keep = preserve_terms()
     rows = pool(a.pairs, a.splits, nikl, keep)
     picked = sample(rows)

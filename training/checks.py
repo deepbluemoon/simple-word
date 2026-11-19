@@ -31,7 +31,7 @@ def check_pair(src, tgt, preserve, nikl):
         miss.append("조건")
     c["conditions"] = {"ok": not miss, "missing": miss}
     eng = [w for w in dict.fromkeys(ENGLISH.findall(src))
-           if w.lower() not in tgt.lower() and not any(a in tgt for a in nikl.get(w, []))]
+           if w.lower() not in tgt.lower() and not any(a in tgt for a in nikl.get(w, {}).get("alternatives", []))]
     c["english"] = {"ok": not eng, "missing": eng}
     ratio = round(len(tgt) / len(src), 3)
     c["length"] = {"ok": ratio <= MAX_LEN_RATIO, "ratio": ratio}

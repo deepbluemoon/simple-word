@@ -1,7 +1,7 @@
 from training.checks import check_pair
 
 PRESERVE = ["과태료", "기초생활수급자"]
-NIKL = {"MICE": ["전시 복합 산업"]}
+NIKL = {"MICE": {"alternatives": ["전시 복합 산업"], "sources": ["test"]}}
 
 
 def reasons(src, tgt):
