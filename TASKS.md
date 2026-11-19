@@ -17,7 +17,7 @@
 
 ### 현재 기준
 - **1차 v0.1 완료**: `main` 커밋 `33fe9b6` (`Port ops dashboard to Simple Word`, PR #27).
-- **2차 진행**: #28 Max의 v2 학습과 #6 codex2의 로컬 배포 검증. #7 평가셋 검수와 #8 러너·자동화 준비는 사용자 입력을 기다린다.
+- **2차 진행**: #28 v2 champion 완료, #6 로컬 배포·롤백·카나리 검증 완료. #6 클라우드 배포, #7 평가셋 검수, #8 러너·자동화는 남아 있다.
 
 | ID | 작업 | 담당 | 상태 |
 |---|---|---|---|
@@ -30,8 +30,9 @@
 | T7 (#3) | 라우터(champion·canary·shadow, registry 다시 읽기), 부하 차단, 게이트·parity, `reports/` 기록 | Codex | done |
 | T8 | 업로드 웹 화면, Dockerfile·docker compose로 로컬 전체 실행 | Codex | done |
 | T9 (#5) | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS·GCP 감시 + 비용 | codex2 | done |
-| T10 (#6) | 로컬 배포 검증 후 Lightsail·GCP·Route 53 배포와 장애 조치 | codex2 + 사용자(계정·도메인) | doing (로컬 검증) |
+| T10 (#6) | 로컬 배포 검증 후 Lightsail·GCP·Route 53 배포와 장애 조치 | codex2 + 사용자(계정·도메인) | doing (로컬 완료, 클라우드 대기) |
 | T11 (#7) | 평가셋 200건 사람 검수 | 사용자 | waiting user |
 | T8b (#4) | 서비스 화면 Airtable 팔레트 | codex2 | done |
 | T12 (#8) | 셀프호스티드 러너, 수집·누적 학습 워크플로 | 총괄 + 사용자 | waiting user (러너 토큰) |
-| T13 (#28) | 긴 짝·여러 줄 제외 후 백필 데이터로 v2 학습, 시간순 평가와 게이트 검증 | Claude Max | doing |
+| T13 (#28) | 긴 짝·여러 줄 제외 후 백필 데이터로 v2 학습, 시간순 평가와 게이트 검증 | Claude Max | done (v2 champion) |
+| T14 | 서비스 화면 붙여넣기·비교 강조·이어 읽기·내보내기·오류 복구 개선 | codex2 | done |

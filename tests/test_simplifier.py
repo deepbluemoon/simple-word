@@ -66,3 +66,23 @@ def test_preserved_term_guard_falls_back_when_term_dropped():
     simp._one = outputs.get
     assert simp.simplify_detailed(list(outputs)) == [("주민등록증 진위확인 서비스를 이용한다.", True),
                                                      ("주민등록증을 다시 받을 수 있어요.", False)]
+
+
+def test_simplifier_explains_number_term_and_length_fallbacks():
+    simp = Simplifier.__new__(Simplifier)
+    simp.dummy = False
+    outputs = {
+        "20일 안에 신청합니다.": "2일 안에 신청합니다.",
+        "주민등록증 진위확인 서비스입니다.": "주민증 확인 서비스입니다.",
+        "아주 긴 문장입니다.": None,
+    }
+    simp._one = outputs.get
+
+    explained = simp.simplify_explained(list(outputs))
+
+    assert explained == [
+        ("20일 안에 신청합니다.", True, "numbers"),
+        ("주민등록증 진위확인 서비스입니다.", True, "preserve"),
+        ("아주 긴 문장입니다.", True, "length"),
+    ]
+    assert simp.simplify_detailed(list(outputs)) == [(text, fallback) for text, fallback, _ in explained]
