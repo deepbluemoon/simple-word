@@ -9,7 +9,7 @@ import urllib.request
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8000/simplify")
+    parser.add_argument("--url", default="http://127.0.0.1:18016/simplify")
     parser.add_argument("-n", "--requests", type=int, default=100)
     parser.add_argument("-c", "--concurrency", type=int, default=20)
     args = parser.parse_args()
