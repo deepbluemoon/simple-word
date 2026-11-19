@@ -6,17 +6,18 @@
 
 | 구역 | 구성 |
 |---|---|
-| 진입 | Route 53이 30초마다 Lightsail `/health`를 검사. 3번 실패하면 DNS를 GCP로 돌린다(장애 조치 라우팅). |
-| AWS (주) | Lightsail 인스턴스(2 vCPU·2GB): nginx(HTTPS) → FastAPI 라우터 → champion / canary / shadow. Lightsail 버킷: `models/`, `data/`, `registry.json`, `logs/`. 배포는 이 서버의 GitHub 셀프호스티드 러너가 실행. |
-| GCP (대기) | Cloud Run 최소 1대(웜 대기). 같은 Docker 이미지(Artifact Registry), 모델은 Cloud Storage 복제본에서 읽는다. champion만 서빙. 비밀값은 Secret Manager. |
+| 진입 | Route 53 가중치 라우팅 기본값은 Lightsail 90 / GCP 10. 양쪽 헬스체크를 연결하고 죽은 위치는 라우팅에서 제외한다. 장애 조치 시 살아 있는 쪽이 100%를 받는다. |
+| AWS (champion) | Lightsail(2 vCPU·2GB): HTTPS nginx가 동일 이미지·모델의 `api-1`, `api-2`로 부하분산한다. champion만 실행하며 카나리·섀도·오토스케일링은 두지 않는다. Lightsail 버킷: `models/`, `data/`, `registry.json`, `logs/`. |
+| GCP (검증 및 champion) | Cloud Run 3티어, 1 GiB, 최소 1·최대 3 인스턴스. 리비전 비율 카나리, 섀도 트래픽, 오토스케일링을 사용한다. 비밀값은 Secret Manager. |
 | 학습 | Claude Max Mac(GitHub 셀프호스티드 러너 `trainer`): 수집·전처리·교사 생성·학습·평가. |
 | 모니터링 | RM `ops-dashboard`를 가져와 **서비스 서버 밖(사용자 Mac, 127.0.0.1)** 에서 실행. AWS는 SSH를 통한 Docker 조회, GCP는 Cloud Monitoring·Logging API를 조회 전용 계정으로 읽는다. 서비스 서버가 털려도 감시 도구와 그 자격 증명은 함께 털리지 않게 하기 위함. |
 
-장애 조치 예상 시간: Route 53 빠른 헬스체크(10초 간격) 3회 실패 + 짧은 DNS TTL. 실제 시간은 장애 훈련으로 잰다.
+장애 조치 시간은 헬스체크와 DNS 캐시 영향이 있으므로 실제 장애 훈련으로 잰다.
 
 - **확장**: Lightsail에는 오토스케일링이 없다. 대신 업로드 크기·압축 해제 크기·PDF 페이지·문장 수 상한, 동시 처리 수 제한과 넘치면 429로 거절(부하 차단)을 둔다. 더 커져야 하면 스냅샷으로 큰 플랜에 옮긴다(수직 확장). Cloud Run은 자동 확장하되 최대 대수를 정한다.
-- **GCP 대기 방식**: Cloud Run 최소 1대를 켜 둬서 장애 때 콜드 스타트 없이 바로 받는다.
-- **연쇄 다운 방지**: GCP에는 카나리를 올리지 않고, AWS에서 일정 시간 문제없이 돈 champion만 반영한다. 같은 버그가 두 클라우드를 동시에 죽이지 않게 하기 위함. 웹 화면의 재시도는 간격을 점점 늘린다.
+- **GCP 용량**: Cloud Run은 최소 1대·최대 3대로 autoscale한다. 기본 Route 53 가중치는 Lightsail 90 / GCP 10이며, Lightsail 교체 동안 가중치를 임시 상향할 수 있다.
+- **champion 승격**: 새 모델은 GCP 카나리 리비전 비율과 섀도 트래픽으로 검증한 뒤 GCP champion이 된다. 이후 Lightsail의 두 API 컨테이너를 하나씩 헬스·smoke 확인하며 갱신하고 가중치를 기본값으로 되돌린다.
+- **장애 분리**: Route 53 헬스체크가 장애 위치를 라우팅에서 제외한다. 웹 화면 재시도는 간격을 점점 늘린다.
 
 ## 데이터 파이프라인 (Claude Max Mac)
 
@@ -50,7 +51,7 @@
 | 운영 | 서버 CPU p95 지연, 모델 메모리 | 문장당 1초 이하, 모델당 300MB 이하 (초기값) |
 | parity | 학습 환경 출력 = 서빙 컨테이너 출력 | `parity.jsonl` 100% 일치 |
 
-카나리(실제 요청, 정답 없음): 숫자 보존율·용어 잔존율·오류율·지연시간·좋아요 비율을 champion과 비교하고, 하루 한 번 교사 모델로 로그를 다시 채점한다. 하나라도 나쁘면 자동 롤백. LLM 채점은 참고 지표이고 게이트 기준이 아니다.
+GCP 카나리(리비전 비율)와 섀도 요청으로 새 champion을 검증한다. 실제 요청 기반 품질 지표는 숫자 보존율·용어 잔존율·오류율·지연시간·좋아요 비율을 champion과 비교하며, 하루 한 번 교사 모델로 로그를 다시 채점한다. LLM 채점은 참고 지표이고 게이트 기준이 아니다. Lightsail에서는 카나리나 섀도 트래픽을 보내지 않는다.
 
 ## 기록과 알림
 

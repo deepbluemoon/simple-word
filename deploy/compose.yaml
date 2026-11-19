@@ -1,11 +1,10 @@
 services:
-  api:
+  api-1:
     image: ${IMAGE:-simple-word:local}
     build:
       context: ..
       dockerfile: Dockerfile
-    expose:
-      - "8000"
+    expose: ["8000"]
     volumes:
       - ${MODEL_DIR:-../models}:/app/models:ro
       - logs:/app/logs
@@ -19,19 +18,15 @@ services:
       retries: 3
       start_period: 10s
 
-  canary:
-    image: ${CANARY_IMAGE:-simple-word:canary}
+  api-2:
+    image: ${IMAGE:-simple-word:local}
     build:
       context: ..
       dockerfile: Dockerfile
-    profiles: [canary]
-    expose:
-      - "8000"
-    ports:
-      - "${CANARY_PORT:-8001}:8000"
+    expose: ["8000"]
     volumes:
       - ${MODEL_DIR:-../models}:/app/models:ro
-      - canary_logs:/app/logs
+      - logs:/app/logs
     environment:
       LOG_DIR: /app/logs
       MAX_CONCURRENT_SIMPLIFY: ${MAX_CONCURRENT_SIMPLIFY:-2}
@@ -44,13 +39,10 @@ services:
       dockerfile: deploy/proxy.Dockerfile
     ports:
       - "${HOST_PORT:-8000}:80"
-    environment:
-      CANARY_PERCENT: ${CANARY_PERCENT:-0}
-      CANARY_SPLIT_PERCENT: ${CANARY_SPLIT_PERCENT:-1}
-      CANARY_ENABLED: ${CANARY_ENABLED:-0}
-      NGINX_ENVSUBST_FILTER: '^(CANARY_SPLIT_PERCENT|CANARY_ENABLED)$'
     depends_on:
-      api:
+      api-1:
+        condition: service_healthy
+      api-2:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health"]
@@ -60,5 +52,4 @@ services:
       start_period: 5s
 
 volumes:
-  canary_logs:
   logs:
