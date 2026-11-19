@@ -35,14 +35,24 @@ class Simplifier:
         return [text for text, _ in self.simplify_detailed(sentences)]
 
     def simplify_detailed(self, sentences: list[str]) -> list[tuple[str, bool]]:
-        """[(출력, 원문으로 대체했는지)]. 상태를 인스턴스에 남기지 않아 여러 스레드가 같이 써도 된다."""
+        """[(출력, 원문으로 대체했는지)]."""
+        return [(output, fallback) for output, fallback, _ in self.simplify_explained(sentences)]
+
+    def simplify_explained(self, sentences: list[str]) -> list[tuple[str, bool, str | None]]:
+        """[(출력, 원문 대체 여부, 사유)]. 상태는 저장하지 않아 여러 요청이 함께 써도 안전하다."""
         if self.dummy:
-            return [(s, False) for s in sentences]
+            return [(s, False, None) for s in sentences]
         out = []
         for s in sentences:
             y = self._one(s)
-            bad = y is None or numbers(y) != numbers(s) or missing_terms(s, y, preserve_terms())
-            out.append((s, True) if bad else (y, False))
+            if y is None:
+                out.append((s, True, "length"))
+            elif numbers(y) != numbers(s):
+                out.append((s, True, "numbers"))
+            elif missing_terms(s, y, preserve_terms()):
+                out.append((s, True, "preserve"))
+            else:
+                out.append((y, False, None))
         return out
 
     def _one(self, text, max_len=256):

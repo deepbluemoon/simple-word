@@ -37,8 +37,8 @@ def test_simplify_txt_returns_original_and_simple_sentences():
     assert response.json() == {
         "model_version": "dummy",
         "sentences": [
-            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False},
-            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False},
+            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False, "fallback_reason": None, "paragraph_id": 0},
+            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False, "fallback_reason": None, "paragraph_id": 0},
         ],
     }
 
@@ -63,7 +63,8 @@ def test_simplify_extracts_docx_text():
     response = client.post("/simplify", files={"file": ("notice.docx", document)})
 
     assert response.status_code == 200
-    assert response.json()["sentences"] == [{"original": "안내 문장입니다.", "simple": "안내 문장입니다.", "fallback": False}]
+    assert response.json()["sentences"] == [{"original": "안내 문장입니다.", "simple": "안내 문장입니다.", "fallback": False,
+                                             "fallback_reason": None, "paragraph_id": 0}]
 
 
 def test_simplify_extracts_hwpx_text():
@@ -341,3 +342,24 @@ def test_simplify_response_has_fallback_per_sentence_and_feedback_accepts_it(mon
     assert [s["fallback"] for s in sentences] == [True, False] == [s["fallback"] for s in record["sentences"]]
     response = client.post("/feedback", json={"model_version": "v-guard", **sentences[0], "vote": "down"})  # 웹이 문장을 통째로 보내도
     assert response.status_code == 200
+
+
+def test_simplify_reports_fallback_reason_and_paragraph(monkeypatch):
+    class ExplainedModel:
+        def simplify_explained(self, sentences):
+            return [(sentence, True, "numbers") if "20일" in sentence else (sentence, False, None)
+                    for sentence in sentences]
+
+    class OneRouter:
+        def select(self, request_id):
+            return "v-explain", "champion", ExplainedModel(), None, None
+
+    monkeypatch.setattr(api_main, "router", OneRouter())
+    response = client.post("/simplify", files={"file": ("notice.txt", "20일 안에 신청.\n\n다음 문단은 확인합니다.")})
+
+    assert response.json()["sentences"] == [
+        {"original": "20일 안에 신청.", "simple": "20일 안에 신청.", "fallback": True,
+         "fallback_reason": "numbers", "paragraph_id": 0},
+        {"original": "다음 문단은 확인합니다.", "simple": "다음 문단은 확인합니다.", "fallback": False,
+         "fallback_reason": None, "paragraph_id": 1},
+    ]

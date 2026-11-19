@@ -56,7 +56,7 @@ def xml_paragraph_text(data: bytes) -> str:
             )
             if text.strip():
                 paragraphs.append(text)
-    return "\n".join(paragraphs)
+    return "\n\n".join(paragraphs)
 
 
 def extract_text(filename: str, data: bytes) -> str:
@@ -135,25 +135,35 @@ def log_request(
         log.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def run_model(model, sentences: list[str]) -> tuple[list[str], list[bool]]:
-    """(출력, 문장별 숫자 안전장치 fallback 여부). simplify_detailed 가 없는 모델은 fallback 없음으로 본다."""
+def run_model(model, sentences: list[str]) -> tuple[list[str], list[bool], list[str | None]]:
+    """출력, fallback 여부, 이유를 돌려준다. 설명 함수가 없는 기존 모델은 이유를 비워 둔다."""
+    explained = getattr(model, "simplify_explained", None)
+    if explained is not None:
+        triples = explained(sentences)
+        return [text for text, _, _ in triples], [fallback for _, fallback, _ in triples], [reason for _, _, reason in triples]
     detailed = getattr(model, "simplify_detailed", None)
     if detailed is None:
         outputs = model.simplify(sentences)
-        return outputs, [False] * len(outputs)
+        return outputs, [False] * len(outputs), [None] * len(outputs)
     pairs = detailed(sentences)
-    return [text for text, _ in pairs], [fallback for _, fallback in pairs]
+    return [text for text, _ in pairs], [fallback for _, fallback in pairs], [None] * len(pairs)
 
 
 def simplify_content(filename: str, data: bytes, request_id: str):
     started = time.perf_counter()
     version, role, model, shadow_version, shadow_model = router.select(request_id)
     text = extract_text(filename, data)
-    sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+|\n+", text) if part.strip()]
+    paragraph_sentences = [
+        (paragraph_id, part.strip())
+        for paragraph_id, paragraph in enumerate(re.split(r"\n\s*\n+", text.strip()))
+        for part in re.split(r"(?<=[.!?。！？])\s+|\n+", paragraph)
+        if part.strip()
+    ]
+    sentences = [sentence for _, sentence in paragraph_sentences]
     if len(sentences) > MAX_SENTENCES:
         raise HTTPException(status_code=400, detail=f"Document exceeds {MAX_SENTENCES}-sentence limit")
     try:
-        simplified, fallbacks = run_model(model, sentences)
+        simplified, fallbacks, fallback_reasons = run_model(model, sentences)
     except Exception as exc:
         log_request(request_id, role, version, sentences, [], started, type(exc).__name__)
         raise HTTPException(status_code=500, detail="Model inference failed") from exc
@@ -161,8 +171,11 @@ def simplify_content(filename: str, data: bytes, request_id: str):
     payload = {
         "model_version": version,
         "sentences": [
-            {"original": original, "simple": simple, "fallback": fallback}  # fallback: 안전장치로 원문을 돌려준 문장(로그와 같은 값)
-            for original, simple, fallback in zip(sentences, simplified, fallbacks)
+            {"original": original, "simple": simple, "fallback": fallback, "fallback_reason": reason,
+             "paragraph_id": paragraph_id}
+            for (paragraph_id, original), simple, fallback, reason in zip(
+                paragraph_sentences, simplified, fallbacks, fallback_reasons
+            )
         ],
     }
     return payload, sentences, shadow_version, shadow_model
@@ -175,7 +188,7 @@ def run_shadow(request_id: str, version: str, model, sentences: list[str]) -> No
         return
     try:
         try:
-            output, fallbacks = run_model(model, sentences)
+            output, fallbacks, _ = run_model(model, sentences)
         except Exception as exc:
             log_request(request_id, "shadow", version, sentences, [], started, type(exc).__name__)
         else:
