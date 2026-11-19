@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from simple_word.numbers import numbers
+from simple_word.placeholders import mask, unmask
 from simple_word.terms import missing_terms, preserve_terms
 
 EOS = 1  # KoBART: bos = eos = decoder_start = 1
@@ -13,6 +14,8 @@ class Simplifier:
     숫자 안전장치: 출력의 숫자·날짜·금액·비율이 원문과 다르면(100분의 20 = 20% 는 같음) 그 문장은 원문을 돌려준다.
     보존 용어 안전장치: 원문의 보존 용어(simple_word/preserve_terms.txt)가 출력에서 빠져도 원문을 돌려준다.
     255토큰을 넘는 입력도 원문을 돌려준다. 둘 다 fallback 으로 표시한다.
+    자리표시자 모델(tokenizer에 <N0>이 있음, v3~): 숫자·보존 용어를 <N0>·<T0>로 바꿔 넣고 출력에서 되돌린다.
+    출력에 자리표시자가 빠지거나 모르는 것이 있으면 원문을 돌려준다(사유 placeholder).
     """
 
     def __init__(self, artifact_dir: str):
@@ -30,6 +33,7 @@ class Simplifier:
         self.tok = Tokenizer.from_file(str(self.artifact_dir / "tokenizer.json"))
         self.tok.no_padding()
         self.tok.no_truncation()
+        self.placeholders = self.tok.token_to_id("<N0>") is not None
 
     def simplify(self, sentences: list[str]) -> list[str]:
         return [text for text, _ in self.simplify_detailed(sentences)]
@@ -44,7 +48,16 @@ class Simplifier:
             return [(s, False, None) for s in sentences]
         out = []
         for s in sentences:
-            y = self._one(s)
+            if getattr(self, "placeholders", False):
+                masked, slots = mask(s)
+                y = self._one(masked)
+                if y is not None:
+                    y = unmask(y, slots)
+                    if y is None:
+                        out.append((s, True, "placeholder"))
+                        continue
+            else:
+                y = self._one(s)
             if y is None:
                 out.append((s, True, "length"))
             elif numbers(y) != numbers(s):
