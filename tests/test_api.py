@@ -37,8 +37,8 @@ def test_simplify_txt_returns_original_and_simple_sentences():
     assert response.json() == {
         "model_version": "dummy",
         "sentences": [
-            {"original": "첫 문장입니다.", "simple": "첫 문장입니다."},
-            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!"},
+            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False},
+            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False},
         ],
     }
 
@@ -63,7 +63,7 @@ def test_simplify_extracts_docx_text():
     response = client.post("/simplify", files={"file": ("notice.docx", document)})
 
     assert response.status_code == 200
-    assert response.json()["sentences"] == [{"original": "안내 문장입니다.", "simple": "안내 문장입니다."}]
+    assert response.json()["sentences"] == [{"original": "안내 문장입니다.", "simple": "안내 문장입니다.", "fallback": False}]
 
 
 def test_simplify_extracts_hwpx_text():
@@ -311,3 +311,21 @@ def test_request_log_marks_number_fallback_per_sentence(monkeypatch, tmp_path):
 
     assert [s["simple"] for s in response.json()["sentences"]] == ["20일 이내 신청.", "센터에서 받는다.!"]
     assert [s["fallback"] for s in record["sentences"]] == [True, False]
+
+
+def test_simplify_response_has_fallback_per_sentence_and_feedback_accepts_it(monkeypatch, tmp_path):
+    class GuardedModel:
+        def simplify_detailed(self, sentences):
+            return [(s, True) if "20일" in s else (s + "!", False) for s in sentences]
+
+    class OneRouter:
+        def select(self, request_id):
+            return "v-guard", "champion", GuardedModel(), None, None
+
+    monkeypatch.setattr(api_main, "router", OneRouter())
+    sentences = client.post("/simplify", files={"file": ("a.txt", "20일 이내 신청.\n센터에서 받는다.")}).json()["sentences"]
+    record = json.loads((tmp_path / "requests.jsonl").read_text().splitlines()[0])
+
+    assert [s["fallback"] for s in sentences] == [True, False] == [s["fallback"] for s in record["sentences"]]
+    response = client.post("/feedback", json={"model_version": "v-guard", **sentences[0], "vote": "down"})  # 웹이 문장을 통째로 보내도
+    assert response.status_code == 200
