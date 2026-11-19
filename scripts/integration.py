@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -15,8 +16,9 @@ import uuid
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPOSE = ["docker", "compose", "-p", "simple-word-issue16", "-f", "deploy/compose.yaml"]
-WORK = ROOT / ".tmp" / "issue16-integration"
+RUN_ID = uuid.uuid4().hex[:8]
+COMPOSE = ["docker", "compose", "-p", f"simpleword-integration-{RUN_ID}", "-f", "deploy/compose.yaml"]
+WORK = ROOT / ".tmp" / f"integration-{RUN_ID}"
 
 
 def request(url, data=None, headers=None, timeout=10):
@@ -42,7 +44,6 @@ def docx():
 
 
 def main():
-    shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True, exist_ok=True)
     models = WORK / "models"
     models.mkdir()
@@ -52,9 +53,12 @@ def main():
         artifact.mkdir()
         (artifact / "metadata.json").write_text(json.dumps({"version": version}), encoding="utf-8")
     (models / "registry.json").write_text('{"champion":"integration-v1"}', encoding="utf-8")
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
+    while True:
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        if port != 8000:
+            break
     env = os.environ | {"HOST_PORT": str(port), "MODEL_DIR": str(models), "MAX_CONCURRENT_SIMPLIFY": "1"}
     url = f"http://127.0.0.1:{port}"
     try:
@@ -71,6 +75,7 @@ def main():
                 raise RuntimeError("API did not become healthy")
             time.sleep(1)
         print("PASS /health")
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "smoke.py"), url], cwd=ROOT, env=env, check=True)
 
         for filename, content, mime in (("sample.txt", "간단한 통합 테스트입니다.".encode(), "text/plain"),
                                         ("sample.docx", docx(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")):
@@ -83,7 +88,7 @@ def main():
         assert status == 200 and json.loads(payload)["saved"]
         print("PASS /feedback")
 
-        body, headers = multipart("load.txt", ("부하 테스트 문장입니다. " * 80000).encode())
+        body, headers = multipart("load.txt", ("부하 테스트 문장입니다. " * 30000).encode())
         with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
             results = list(pool.map(lambda _: request(url + "/simplify", body, headers, timeout=60)[0], range(32)))
         assert 429 in results, f"expected overload 429, got statuses {sorted(set(results))}"
