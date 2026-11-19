@@ -33,3 +33,13 @@ def test_onnx_greedy_matches_torch_greedy(tmp_path):
         assert got == tok.decode(gen[0], skip_special_tokens=True).strip()
     assert simp.simplify(texts) == simp.simplify(texts)
     assert Path(tmp_path / "models/t/parity.jsonl").read_text().count("\n") == 20 and meta["version"] == "t"
+
+
+def test_input_over_255_tokens_is_returned_unchanged():
+    class Tok:
+        def encode(self, text, add_special_tokens=False):
+            return type("E", (), {"ids": [7] * 256})()
+
+    simp = Simplifier.__new__(Simplifier)  # 모델 없이 _one 의 길이 가드만 확인 (가드가 없으면 encoder=None 에서 터짐)
+    simp.dummy, simp.tok, simp.encoder = False, Tok(), None
+    assert simp.simplify(["아주 긴 문장"]) == ["아주 긴 문장"]

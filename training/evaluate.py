@@ -66,9 +66,22 @@ print((resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before) / 2**20)  # 
 
 
 def model_memory_mb(model_dir, sample):
-    """새 프로세스에서 라이브러리 import 뒤 모델 불러오기+추론으로 늘어난 최대 RSS."""
-    out = subprocess.run([sys.executable, "-c", MEMORY_PROBE, str(model_dir), *sample], capture_output=True, text=True, check=True)
-    return round(float(out.stdout.strip().splitlines()[-1]), 1)
+    """새 프로세스에서 라이브러리 import 뒤 모델 불러오기+추론으로 늘어난 최대 RSS(MB)."""
+    runs = [subprocess.run([sys.executable, "-c", MEMORY_PROBE, str(model_dir), *sample], capture_output=True, text=True, check=True)
+            for _ in range(3)]  # 한 번 재면 ±30MB 흔들려서 3번의 중앙값
+    return round(statistics.median(float(r.stdout.strip().splitlines()[-1]) for r in runs), 1)
+
+
+def _graph(path):
+    import onnx
+
+    return onnx.load(str(path), load_external_data=False).graph
+
+
+def _is_int8(path):
+    """quantize_dynamic 결과 그래프에는 DynamicQuantizeLinear / MatMulInteger 노드가 있다."""
+    g = _graph(path)
+    return any(n.op_type in ("DynamicQuantizeLinear", "MatMulInteger", "DynamicQuantizeMatMul") for n in g.node)
 
 
 def evaluate(version, test_path, model_root="models", data_dir="data", with_bert=True):
@@ -78,6 +91,8 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     rows = [json.loads(l) for l in Path(test_path).open(encoding="utf-8")]
     srcs, refs = [r["src"] for r in rows], [r["tgt"] for r in rows]
     simp, outs, ms = Simplifier(str(model_dir)), [], []
+    if simp.dummy or not all(_is_int8(model_dir / f) for f in ("encoder.onnx", "decoder.onnx")):
+        raise ValueError(f"{model_dir}: INT8 ONNX 모델이 아니다. 게이트 지표는 서빙과 같은 INT8 ONNX로만 계산한다")
     for s in srcs:
         t = time.perf_counter()
         outs += simp.simplify([s])
@@ -87,6 +102,7 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
         m["bert_score"] = bert_score_f1(outs, srcs)  # 원문 대비 의미 유사도
     m["cpu_p95_ms_per_sentence"] = round(statistics.quantiles(ms, n=20)[18], 1)
     m["model_memory_mb"] = model_memory_mb(model_dir, srcs[:20])
+    m["eval_model"] = "onnx_int8_cpu"  # 게이트 지표는 서빙과 같은 INT8 ONNX(onnxruntime CPU, 스레드 1) 출력에서 계산
     meta_path = model_dir / "metadata.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["metrics"].update(m)
