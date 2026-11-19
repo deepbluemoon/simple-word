@@ -16,6 +16,12 @@
 - 리뷰 후 압축 해제 총량 20 MiB, PDF 50페이지, 문장 500개 제한과 `/feedback` 문자열 2,000자 제한을 추가했다. 추출·모델 실행은 Starlette threadpool에서 처리한다.
 - 검증: `pytest -q` 15 passed. Compose 컨테이너 UID 10001(app) 확인, POST `/feedback` 성공 및 JSONL 저장 확인 후 전용 테스트 볼륨을 제거했다.
 
+## 2026-11-19 Codex T7
+- `codex/t7-router-gate`에 registry 기반 champion/canary/shadow 라우터, 비동기 threadpool 추론·요청 부하 제한, PII 가림 요청 JSONL, parity/metric gate와 모델 리포트 생성을 추가했다.
+- parity 행 스키마는 `{"input": "문장" 또는 ["문장"], "output": "결과" 또는 ["결과"]}`. 지표 키와 수치는 `gate/thresholds.json` 기준으로 metadata `metrics`에 맞춘다.
+- 검증: pytest 23 passed. Compose에서 파일을 바꿔 `hot-a`→`hot-b`가 컨테이너 재시작 없이 `/health`와 `/simplify`에 반영됨을 확인했다.
+- 리뷰 #3: 명시된 `dummy` 외 registry 버전은 metadata/ONNX 파일과 모델 로딩을 확인하고 실패 시 경고하며 기존 라우팅을 유지한다. 추론 실패는 role/version/error를 요청 로그에 남기고 500을 반환한다. 메인 슬롯은 추론 직후 반환하고 shadow는 별도 1슬롯 semaphore에서 바쁘면 생략 로그를 남긴다. pytest 27 passed.
+
 ## 2026-11-19 Codex T9
 - 화면 이슈 #4: 업로드 UI를 흰 바탕·잉크색·시스템 산세리프·알약형 기본 버튼으로 조정하고 모바일 문장 열 재배치와 포커스 표시를 유지했다. 커밋 `1ceaa40` (`Refs #4`).
 - RM `ops-dashboard/`를 가져온 뒤 RM 대응 액션·서비스 이름·운영 스크립트·컨테이너 실행 구성을 제거했다. 기존 RM 다크 모니터링 스타일을 유지하면서 AWS SSH Docker 조회, GCP Cloud Run/Monitoring/Logging 조회, 비용 탭을 추가했다.

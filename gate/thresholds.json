@@ -1,0 +1,20 @@
+{
+  "must_equal": {
+    "number_date_amount_match_rate": 1.0,
+    "preserved_terms_retention_rate": 1.0
+  },
+  "at_least_champion": [
+    "bert_score",
+    "sentence_length_reduction_rate"
+  ],
+  "at_most_champion": [
+    "difficult_term_retention_rate"
+  ],
+  "above_champion": [
+    "sari"
+  ],
+  "maximum": {
+    "cpu_p95_ms_per_sentence": 1000,
+    "model_memory_mb": 300
+  }
+}
