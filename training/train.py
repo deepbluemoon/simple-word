@@ -105,6 +105,23 @@ def add_placeholder_tokens(tok):
     return tok
 
 
+def init_placeholder_embeddings(tok, model):
+    """새 토큰이 서로 비슷하게 시작하면 모델이 모두 <N0>으로 쓴다(v3-dry 첫 시도: fallback 43%).
+    <Nk>는 숫자 k 토큰('▁k', 10~19는 '▁10'…) 임베딩으로, <Tk>는 숫자 k와 '▁명칭'의 평균으로 시작해 서로 구별되게 한다.
+    마스킹 뒤 원문에는 숫자가 남지 않으므로 <Nk>와 진짜 숫자가 헷갈릴 일이 없다. KoBART는 입력·출력 임베딩을 공유한다."""
+    import torch
+    from simple_word.placeholders import MAX_N, MAX_T
+
+    emb = model.get_input_embeddings().weight
+    vid = lambda t: tok.convert_tokens_to_ids(t)
+    name = emb[vid("▁명칭")]
+    with torch.no_grad():
+        for k in range(MAX_N):
+            emb[vid(f"<N{k}>")] = emb[vid(f"▁{k}")]
+        for k in range(MAX_T):
+            emb[vid(f"<T{k}>")] = (emb[vid(f"▁{k}")] + name) / 2
+
+
 def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", model_root="models", split="hash", docs=None,
           eval_set=None, patience=2, placeholders=False):
     published = {}
@@ -132,6 +149,7 @@ def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", mo
     if placeholders:
         add_placeholder_tokens(tok)
         model.resize_token_embeddings(len(tok))
+        init_placeholder_embeddings(tok, model)
         (fit["train"], d_train), (fit["valid"], d_valid) = placeholder_rows(fit["train"]), placeholder_rows(fit["valid"])
         ph_info = {"dropped_train": d_train, "dropped_valid": d_valid, "vocab": len(tok)}
     device = "mps" if torch.backends.mps.is_available() else "cpu"

@@ -1,7 +1,8 @@
+import json
 from pathlib import Path
 
 from simple_word.numbers import numbers
-from simple_word.placeholders import mask, unmask
+from simple_word.placeholders import TOKENS as PH_TOKENS, mask, unmask
 from simple_word.terms import missing_terms, preserve_terms
 
 EOS = 1  # KoBART: bos = eos = decoder_start = 1
@@ -18,7 +19,7 @@ class Simplifier:
     출력에 자리표시자가 빠지거나 모르는 것이 있으면 원문을 돌려준다(사유 placeholder).
     """
 
-    def __init__(self, artifact_dir: str):
+    def __init__(self, artifact_dir: str, force_placeholders: bool | None = None):
         self.artifact_dir = Path(artifact_dir)
         self.dummy = not (self.artifact_dir / "encoder.onnx").exists()
         if self.dummy:
@@ -34,6 +35,15 @@ class Simplifier:
         self.tok.no_padding()
         self.tok.no_truncation()
         self.placeholders = self.tok.token_to_id("<N0>") is not None
+        # 자리표시자를 다 쓰기 전에는 EOS를 막을지: metadata.json decoding.force_placeholders (기본 False).
+        # 켜면 fallback은 줄지만 빠진 숫자를 엉뚱한 문장에 붙여 뜻이 틀릴 수 있다 (docs/T6_V3.md 비교).
+        if force_placeholders is None:
+            meta = self.artifact_dir / "metadata.json"
+            try:
+                force_placeholders = bool(json.loads(meta.read_text(encoding="utf-8")).get("decoding", {}).get("force_placeholders"))
+            except (OSError, ValueError):
+                force_placeholders = False
+        self.force_placeholders = force_placeholders
 
     def simplify(self, sentences: list[str]) -> list[str]:
         return [text for text, _ in self.simplify_detailed(sentences)]
@@ -50,7 +60,7 @@ class Simplifier:
         for s in sentences:
             if getattr(self, "placeholders", False):
                 masked, slots = mask(s)
-                y = self._one(masked)
+                y = self._one(masked, slots=slots, force=getattr(self, "force_placeholders", False))
                 if y is not None:
                     y = unmask(y, slots)
                     if y is None:
@@ -68,7 +78,9 @@ class Simplifier:
                 out.append((y, False, None))
         return out
 
-    def _one(self, text, max_len=256):
+    def _one(self, text, max_len=256, slots=None, force=False):
+        """탐욕 디코딩. slots(자리표시자 모델)를 주면 입력에 없는 자리표시자는 내지 않는다.
+        force면 입력의 자리표시자를 모두 쓰기 전에는 문장을 끝내지 않는다(EOS 막음)."""
         import numpy as np
 
         ids = self.tok.encode(text, add_special_tokens=False).ids
@@ -84,12 +96,23 @@ class Simplifier:
         past_names = [i.name for i in self.decoder.get_inputs() if i.name.startswith("past_")]
         past = [np.zeros((1, heads, 0, hd), dtype=np.float32) for _ in past_names]  # KV 캐시, 처음엔 길이 0
         out = [EOS]
+        need, banned = set(), []
+        if slots is not None:
+            ph = {t: self.tok.token_to_id(t) for t in PH_TOKENS}
+            need = {ph[t] for t in slots}
+            banned = [i for t, i in ph.items() if t not in slots and i is not None]
         for step in range(min(2 * len(ids) + 16, max_len)):
             feed.update(zip(past_names, past))
             feed["input_ids"] = np.array([[out[-1]]], dtype=np.int64)
             feed["position_ids"] = np.array([[step]], dtype=np.int64)
             logits, *past = self.decoder.run(None, feed)
-            nxt = int(logits[0, -1].argmax())
+            row = logits[0, -1]
+            if slots is not None:
+                row = row.copy()
+                row[banned] = -np.inf
+                if force and need - set(out):
+                    row[EOS] = -np.inf
+            nxt = int(row.argmax())
             if nxt == EOS:
                 break
             out.append(nxt)
