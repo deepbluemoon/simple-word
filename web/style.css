@@ -1,0 +1,21 @@
+:root { font-family: system-ui, sans-serif; color: #17212b; background: #f4f7f9; font-size: 20px; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(100% - 2rem, 900px); margin: 2rem auto; }
+h1 { font-size: clamp(2rem, 8vw, 3rem); margin: 0 0 .5rem; }
+.intro { margin: 0 0 1.5rem; }
+form, .sentence { background: white; border: 1px solid #cbd5df; border-radius: 12px; padding: 1rem; }
+form { display: grid; gap: .75rem; }
+input, button { font: inherit; }
+input { max-width: 100%; }
+button { min-height: 52px; border: 0; border-radius: 8px; padding: .5rem 1rem; color: white; background: #075ca8; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 3px solid #f0a000; outline-offset: 2px; }
+#status { min-height: 1.5em; }
+.column-headings, .sentence-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .75rem; }
+.column-headings h2 { font-size: 1.15rem; }
+.sentence { margin-bottom: .75rem; min-width: 0; overflow-wrap: anywhere; }
+.sentence-columns p { margin: 0 0 .75rem; white-space: pre-wrap; }
+.vote-buttons { display: flex; gap: .5rem; }
+.vote-buttons button { flex: 1; }
+.vote-buttons button[aria-pressed="true"] { background: #174a32; }
+@media (max-width: 380px) { :root { font-size: 17px; } main { width: min(100% - 1rem, 900px); } .sentence-columns, .column-headings { gap: .4rem; } }

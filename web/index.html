@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>쉬운 말로 바꾸기</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <main>
+      <h1>쉬운 말로 바꾸기</h1>
+      <p class="intro">공문서 파일을 올리면 문장별로 쉬운 말을 보여드립니다.</p>
+      <form id="upload-form">
+        <label for="file">문서 파일 선택 (TXT, DOCX, HWPX, PDF)</label>
+        <input id="file" name="file" type="file" accept=".txt,.docx,.hwpx,.pdf" required>
+        <button type="submit">쉽게 바꾸기</button>
+      </form>
+      <p id="status" role="status" aria-live="polite"></p>
+      <section id="results" aria-label="변환 결과" hidden>
+        <div class="column-headings"><h2>원문</h2><h2>쉬운 말</h2></div>
+        <div id="sentences"></div>
+      </section>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
