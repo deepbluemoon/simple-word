@@ -1,69 +1,76 @@
-# 아키텍처 (초안, T1)
+# 아키텍처
 
-모델 종류와 학습 데이터는 T2 조사 결과에 따라 정한다. 이 문서는 모듈 경계와 약속(인터페이스)을 먼저 고정해서 각 에이전트가 병렬로 작업하게 하는 것이 목적이다.
+그림: https://claude.ai/artifact/Df22Ed1pakpaMb52nr73ei (드래그로 수정 가능, 로컬 스냅샷은 git에서 제외된 `.board/`)
 
-## 흐름
+## 클라우드 구성
 
-```
-[사용자] 파일 업로드 (txt, pdf, docx, hwpx)
-   ↓
-[api] POST /simplify ─ 파일→텍스트 → 문장 분할 → 라우터 ─┬─ champion 모델 → 응답
-                                                         ├─ canary 모델 (트래픽 일부) → 응답
-                                                         └─ shadow 모델 (기록만, 응답 안 함)
-   ↓ 요청·응답·모델 버전 로그
-[monitor] 카나리·섀도 지표 비교 → 나쁘면 롤백
+| 구역 | 구성 |
+|---|---|
+| 진입 | Route 53이 30초마다 Lightsail `/health`를 검사. 3번 실패하면 DNS를 GCP로 돌린다(장애 조치 라우팅). |
+| AWS (주) | Lightsail 인스턴스(2 vCPU·2GB): nginx(HTTPS) → FastAPI 라우터 → champion / canary / shadow. Lightsail 버킷: `models/`, `data/`, `registry.json`, `logs/`. 배포는 이 서버의 GitHub 셀프호스티드 러너가 실행. |
+| GCP (대기) | Cloud Run 최소 0대. 같은 Docker 이미지(Artifact Registry), 모델은 Cloud Storage 복제본에서 읽는다. champion만 서빙. 비밀값은 Secret Manager. |
+| 학습 | Claude Max Mac(GitHub 셀프호스티드 러너 `trainer`): 수집·전처리·교사 생성·학습·평가. |
+| 모니터링 | RM `ops-dashboard`를 가져와 **서비스 서버 밖(사용자 Mac, 127.0.0.1)** 에서 실행. AWS는 SSH를 통한 Docker 조회, GCP는 Cloud Monitoring·Logging API를 조회 전용 계정으로 읽는다. 서비스 서버가 털려도 감시 도구와 그 자격 증명은 함께 털리지 않게 하기 위함. |
 
-[공급원] 보도자료·공고문 등 새 공문서 → [teacher] Ollama가 쉬운 말 짝 생성
-   ↓
-[training] 데이터 스냅샷 → 학습 → 평가 → 모델 아티팩트
-   ↓
-[gate] champion 대비 성능 + parity 검증 → 통과 시 registry에 등록 → canary로 시작
-```
+장애 조치 예상 시간: 헬스체크 3회 실패(약 90초) + DNS TTL 60초. Cloud Run 첫 요청은 모델 로딩으로 몇 초 늦다. 실제 시간은 장애 훈련으로 잰다.
 
-## 디렉토리와 담당
+## 데이터 파이프라인 (Claude Max Mac)
+
+- **수집**: 크론(매일). 웹훅이 아닌 이유는 정부 RSS가 새 글을 알려 주지 않는 pull 방식이기 때문. URL·본문 해시로 이미 받은 글은 건너뛴다(여러 번 돌려도 결과 같음). 과거 글은 부처 보도자료 게시판을 거슬러 올라가며 한 번 채운다.
+- **변환 단계**
+  1. `raw/<날짜>/<id>.html` 원문 그대로
+  2. `docs.jsonl` `{id, url, source, published_at, title, body, fetched_at, license}`
+  3. `sentences.jsonl` `{doc_id, idx, text}`
+  4. `pairs.jsonl` `{src, tgt, teacher, checks, passed, reject_reason}`
+  5. `data/v<N>/` train·valid·test(문서 단위 분할) + 사람 검수 평가셋 200건(고정)
+- **전처리 기준**: HTML·메뉴·첨부 목록·담당자 블록 제거, NFC 정규화, 개인정보(전화·이메일·주민번호 형식) 가림, 문장 길이 10~200자, 한글 비율 50% 미만 문장 제외(문장 안의 영어 단어는 남김), 정확·유사 중복 제거.
+- **결측 처리**: 채워 넣지 않고 버리며 이유를 기록. 본문 없음 → 문서 버림. 게시일 없음 → 수집 시각으로 대신하고 표시. 교사 출력 없음·실패 → 짝 버림. 버린 비율은 매일 기록하고 급증하면 알린다.
+- **짝 검사**: 숫자·날짜·금액·비율 일치(100분의 20 = 20%), 보존 용어(법적 지위·고유명사·공식 명칭) 유지, 대상·기한·조건 누락 여부, 원문의 영어 단어가 결과에 남았거나 사전 대체어로 바뀌었는지.
+- **학습 시점**: 매일이 아니라 검사를 통과한 새 짝이 일정량(초기값 2,000건, 첫 수집량 보고 조정) 쌓이거나 드리프트가 감지될 때.
+
+## 모델
+
+- 교사: Ollama `gemma3:27b` (Claude Max Mac, API 비용 없음)
+- 학생: KoBART 전체 파인튜닝(시퀀스 단위 지식 증류). 비교 후보: Qwen3-0.6B LoRA.
+- 서빙: ONNX INT8, 결정적 디코딩.
+
+## 평가와 게이트
+
+| 구분 | 지표 | 통과 기준 |
+|---|---|---|
+| 뜻 보존 | 숫자·날짜·금액 일치율, 보존 용어 유지율 | 평가셋 200건에서 100% |
+| 뜻 보존 | 원문 대비 의미 유사도(BERTScore) | champion 이상 |
+| 쉬움 | 어려운 용어 잔존율(국립국어원 목록), 문장 길이 감소율 | champion보다 나쁘지 않음 |
+| 정답 비교 | SARI(교사 출력·평가셋 기준) | champion보다 높음 |
+| 운영 | 서버 CPU p95 지연, 모델 메모리 | 문장당 1초 이하, 모델당 300MB 이하 (초기값) |
+| parity | 학습 환경 출력 = 서빙 컨테이너 출력 | `parity.jsonl` 100% 일치 |
+
+카나리(실제 요청, 정답 없음): 숫자 보존율·용어 잔존율·오류율·지연시간·좋아요 비율을 champion과 비교하고, 하루 한 번 교사 모델로 로그를 다시 채점한다. 하나라도 나쁘면 자동 롤백. LLM 채점은 참고 지표이고 게이트 기준이 아니다.
+
+## 기록과 알림
+
+- 학습 이력: `reports/model_history.jsonl`(학습 1회 = 1줄)과 여기서 만든 `reports/MODEL_REPORT.md`(champion vs 새 모델). 학습 워크플로가 저장소에 커밋한다.
+- 알림: GitHub 기본 메일(워크플로 실패). Lightsail 알람도 메일.
+- 데이터베이스는 처음에 두지 않는다. 요청 로그·피드백은 JSONL로 쌓아 몇 분마다 버킷(`logs/`)에 올린다. 복잡한 조회가 필요해지면 PostgreSQL을 추가한다.
+
+## 모듈과 담당
 
 | 경로 | 내용 | 담당 |
 |---|---|---|
-| `simple_word/model.py` | 추론 인터페이스 (아래 약속 1) | Claude Max |
-| `training/` | 데이터 수집·전처리, 교사 모델 짝 생성, 학습, 평가 | Claude Max |
+| `simple_word/model.py` | 추론 인터페이스 | Claude Max |
+| `training/` | 수집·전처리·교사 생성·학습·평가 | Claude Max |
 | `api/` | FastAPI, 파일→텍스트, 라우터 | Codex |
-| `web/` | 업로드 화면 (정적 HTML/JS, api가 서빙) | Claude Max |
-| `gate/` | 게이트·parity 검증 스크립트 | Codex |
+| `web/` | 업로드 화면 (정적 HTML/JS, api가 서빙) | Codex (Claude Max가 T5 중이라 넘김) |
+| `gate/` | 게이트·parity 검증 | Codex |
+| `deploy/` | Dockerfile, compose, 배포·롤백 스크립트 | Codex |
+| `ops-dashboard/` | RM에서 가져온 운영 대시보드 (로컬 실행) | Codex |
 | `.github/workflows/` | CI/CD | Codex |
-| `deploy/` | Dockerfile, 배포·롤백 스크립트 | Codex |
-| `tests/` | 각 모듈 테스트 | 각 담당 + Codex 리뷰 |
 
 ## 약속
 
-### 1. 추론 인터페이스
-```python
-class Simplifier:
-    def __init__(self, artifact_dir: str): ...
-    def simplify(self, sentences: list[str]) -> list[str]: ...
-```
-- 입력과 출력의 길이와 순서가 같다.
-- 같은 입력에는 같은 출력이 나온다(결정적 디코딩). parity 검증의 전제다.
-
-### 2. 모델 아티팩트
-`models/<version>/` 디렉토리 하나가 모델 하나다.
-- 모델 파일들
-- `metadata.json`: `version`, `created_at`, `data_snapshot`, `base_model`, `metrics`
-- `parity.jsonl`: 고정 입력 문장과 학습 환경에서 나온 출력. 서빙 환경이 같은 출력을 내는지 확인하는 데 쓴다.
-
-### 3. 레지스트리 (Lightsail 버킷)
-`registry.json` 하나로 지금 어떤 모델이 무슨 역할인지 정한다.
-```json
-{"champion": "v3", "canary": "v4", "canary_weight": 0.1, "shadow": null}
-```
-- 배포 = 이 파일을 바꾸는 것. 롤백 = 이전 버전으로 되돌리는 것.
-- api는 이 파일을 주기적으로 다시 읽는다.
-
-### 4. API
-- `POST /simplify` (multipart 파일) → `{"model_version": "...", "sentences": [{"original": "...", "simple": "..."}]}`
-- `POST /feedback` → 사용자 평가(좋아요/싫어요)를 기록. 카나리 판정에 보조 지표로 쓴다.
-- `GET /health` → 로드된 모델 버전들
-
-## 미정 (T2 이후)
-- 모델: 문장 생성 모델(KoBART·KoT5 계열 소형)을 증류할지, 다른 방식인지.
-- 평가 지표: 쉬운 말 변환은 정답이 하나가 아니다. 후보는 원문 대비 의미 보존 점수, 읽기 쉬움 점수, Ollama 교사 모델의 채점.
-- 서빙 메모리: Lightsail은 메모리가 1.9GB다. champion·canary·shadow 세 모델을 동시에 올리려면 모델이 작아야 한다(INT8 양자화 등).
+1. **추론**: `Simplifier(artifact_dir).simplify(sentences: list[str]) -> list[str]`. 길이·순서 같음, 같은 입력엔 같은 출력.
+2. **모델 아티팩트**: `models/<version>/` = 모델 파일 + `metadata.json`(`version`, `created_at`, `data_snapshot`, `base_model`, `metrics`) + `parity.jsonl`.
+3. **레지스트리**: 버킷의 `registry.json` `{"champion": "v3", "canary": "v4", "canary_weight": 0.1, "shadow": null}`. 배포·롤백 = 이 파일 변경.
+4. **API**: `POST /simplify`(파일) → `{"model_version", "sentences": [{"original", "simple"}]}`, `POST /feedback`, `GET /health`.
+5. **서빙 컨테이너**: 모델 폴더는 읽기 전용(`:ro`)으로 마운트. 쓰기는 로그 폴더만.
+6. **로컬 먼저**: 서버에 올리기 전에 `docker compose up`으로 로컬에서 같은 구성을 띄워 확인한다.

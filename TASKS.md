@@ -15,7 +15,14 @@
 
 | ID | 작업 | 담당 | 상태 |
 |---|---|---|---|
-| T1 | 아키텍처·모듈 경계·인터페이스 정의 (`docs/ARCHITECTURE.md`) | 총괄 | review |
-| T2 | 데이터 조사: 짝 데이터, 재학습용 새 데이터 공급원, Ollama 교사 모델 실험 | Claude Max | doing |
+| T1 | 아키텍처·모듈 경계·인터페이스 정의 (`docs/ARCHITECTURE.md`) | 총괄 | done |
+| T2 | 데이터 조사 (`docs/DATA_RESEARCH.md`, 브랜치 `max/t2-data-research`) | Claude Max | done |
 | T3 | Lightsail 사양 확인 | 총괄 | done |
-| T4 | 저장소 골격, 테스트 실행 CI 기본 구성 | Codex | review |
+| T4 | 저장소 골격, 테스트 실행 CI | Codex | done |
+| T5 | 수집기(크론)·과거 글 채우기·전처리·교사 짝 생성·자동 검사, 50건 배치로 통과율 측정 | Claude Max | doing |
+| T6 | 학생 모델 학습(KoBART 전체 파인튜닝 vs Qwen3-0.6B LoRA), ONNX INT8, 실제 `Simplifier` | Claude Max | todo |
+| T7 | 게이트·parity, `reports/` 기록, 레지스트리 | Codex | todo |
+| T8 | 업로드 웹 화면, Dockerfile·docker compose로 로컬 전체 실행 | Codex | doing |
+| T9 | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS(SSH Docker)·GCP(Cloud Monitoring) 둘 다 감시 | Codex | todo |
+| T10 | Lightsail·GCP·Route 53 배포와 장애 조치 | Codex + 사용자(계정·도메인) | todo |
+| T11 | 평가셋 200건 사람 검수 | 사용자 | todo |
