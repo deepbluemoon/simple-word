@@ -16,4 +16,6 @@ def test_checks_catch_t2_teacher_errors():
     assert reasons(src2, "65세 이상 어려운 어르신을 위해 MICE 행사를 엽니다.") == "preserve,conditions"
     assert reasons(src2, "65세 이상 기초생활수급자를 위해 전시 복합 산업 행사를 엽니다.") is None  # 사전 대체어 허용
     assert reasons("한국전력공사, 국립공원공단, 한국공항공사", "한국전력공사, 국립공원공단, 한국공항공사") is None
+    assert reasons("’26/’27년 동절기", "2026년, 2027년 겨울") is None
+    assert reasons("「약사법 시행령 의견, 「고시」 의견", "약사법 시행령 의견, 「고시」 의견") is None  # 안 닫힌 괄호
     assert reasons("3억 5,000만 원을 지원한다.", "3억 원을 지원해요.") == "numbers"
