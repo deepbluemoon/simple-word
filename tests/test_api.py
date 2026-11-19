@@ -126,13 +126,23 @@ def test_simplify_rejects_pdf_over_page_limit():
     assert "50-page" in response.json()["detail"]
 
 
-def test_simplify_rejects_more_than_500_sentences():
-    content = "\n".join(["문장"] * 501)
+def test_simplify_rejects_more_than_100_sentences():
+    content = "\n".join(["문장"] * 101)
 
     response = client.post("/simplify", files={"file": ("many.txt", content)})
 
     assert response.status_code == 400
-    assert "500-sentence" in response.json()["detail"]
+    assert "100-sentence" in response.json()["detail"]
+
+
+def test_simplify_sentence_limit_can_be_configured(monkeypatch):
+    import api.main as api_main
+
+    monkeypatch.setattr(api_main, "MAX_SENTENCES", 1)
+    response = client.post("/simplify", files={"file": ("many.txt", "하나\n둘")})
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Document exceeds 1-sentence limit"}
 
 
 def test_simplify_runs_extraction_and_model_in_threadpool(monkeypatch):

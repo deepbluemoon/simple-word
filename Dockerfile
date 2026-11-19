@@ -3,6 +3,7 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY api ./api
 COPY gate ./gate
+COPY training ./training
 COPY simple_word ./simple_word
 RUN pip install --no-cache-dir .
 COPY web ./web
