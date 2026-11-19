@@ -1,4 +1,4 @@
-"""교사 짝 자동 검사(규칙을 바꾼 뒤 `python -m training.checks` 로 pairs.jsonl 다시 검사): 숫자·날짜·금액·비율 일치, 보존 용어 유지, 대상·기한·조건 누락, 영어 단어 보존/사전 대체."""
+"""교사 짝 자동 검사(규칙을 바꾼 뒤 `python -m training.checks` 로 pairs.jsonl 다시 검사): 숫자·날짜·금액·비율 일치, 보존 용어 유지, 대상·기한·조건 누락, 영어 단어 보존/사전 대체, 길이·한 문단(쉬운 말은 짧아야 하고 한 문장은 한 문장으로)."""
 import re
 
 from simple_word.numbers import numbers  # noqa: F401  (서빙과 같은 함수)
@@ -15,6 +15,7 @@ DEADLINE_SRC = re.compile(r"까지|이내|기한|마감")
 DEADLINE_TGT = re.compile(r"까지|이내|안에|안으로|기한|마감|전에|전까지")
 COND_SRC = re.compile(r"경우|조건|한하여|한해서|(?<![가-힣])단,")  # '공단,' 같은 기관명 끝은 제외
 COND_TGT = re.compile(r"경우|때|면|조건|만|한해|한하여|(?<![가-힣])단,")
+MAX_LEN_RATIO = 1.3  # 교사 출력이 원문보다 이만큼 넘게 길면 탈락 (이슈 #28)
 
 
 def check_pair(src, tgt, preserve, nikl):
@@ -32,6 +33,9 @@ def check_pair(src, tgt, preserve, nikl):
     eng = [w for w in dict.fromkeys(ENGLISH.findall(src))
            if w.lower() not in tgt.lower() and not any(a in tgt for a in nikl.get(w, []))]
     c["english"] = {"ok": not eng, "missing": eng}
+    ratio = round(len(tgt) / len(src), 3)
+    c["length"] = {"ok": ratio <= MAX_LEN_RATIO, "ratio": ratio}
+    c["multiline"] = {"ok": "\n" not in tgt.strip()}
     fails = [k for k, v in c.items() if not v["ok"]]
     return {"checks": c, "passed": not fails, "reject_reason": ",".join(fails) or None}
 
@@ -48,4 +52,6 @@ if __name__ == "__main__":
         if p["tgt"]:
             p.update(check_pair(p["src"], p["tgt"], preserve, nikl))
     (data / "pairs.jsonl").write_text("".join(json.dumps(p, ensure_ascii=False) + "\n" for p in pairs), encoding="utf-8")
+    import collections
     print("passed", sum(p["passed"] for p in pairs), "/", len(pairs))
+    print(dict(collections.Counter(r for p in pairs for r in (p.get("reject_reason") or "").split(",") if r)))
