@@ -25,8 +25,8 @@
 | T6 (#2) | 학생 모델 학습(KoBART 전체 파인튜닝, 미달 시에만 Qwen3-0.6B LoRA), ONNX INT8, 실제 `Simplifier` | Claude Max | doing (준비) |
 | T7 (#3) | 라우터(champion·canary·shadow, registry 다시 읽기), 부하 차단, 게이트·parity, `reports/` 기록 | Codex | doing |
 | T8 | 업로드 웹 화면, Dockerfile·docker compose로 로컬 전체 실행 | Codex | done |
-| T9 (#5) | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS·GCP 감시 + 비용 | codex2 | doing |
+| T9 (#5) | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS·GCP 감시 + 비용 | codex2 | done |
 | T10 (#6) | Lightsail·GCP·Route 53 배포와 장애 조치 | Codex + 사용자(계정·도메인) | todo |
 | T11 (#7) | 평가셋 200건 사람 검수 | 사용자 | todo |
-| T8b (#4) | 서비스 화면 Airtable 팔레트 | codex2 | doing |
+| T8b (#4) | 서비스 화면 Airtable 팔레트 | codex2 | done |
 | T12 (#8) | 셀프호스티드 러너, 수집·누적 학습 워크플로 | 총괄 + 사용자 | todo |
