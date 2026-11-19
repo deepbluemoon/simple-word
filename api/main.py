@@ -1,35 +1,207 @@
+import io
+import json
+import os
 import re
+import threading
+import time
+import uuid
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Literal
+from xml.etree import ElementTree
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
-from simple_word.model import Simplifier
+from api.router import ModelRouter
 
 app = FastAPI()
-simplifier = Simplifier(artifact_dir="models")
-MODEL_VERSION = "dummy"
+LOG_DIR = Path(os.getenv("LOG_DIR", "./logs"))
+router = ModelRouter(os.getenv("REGISTRY_PATH", "models/registry.json"))
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+MAX_UNPACKED_BYTES = 20 * 1024 * 1024
+MAX_PDF_PAGES = 50
+MAX_SENTENCES = 500
+SIMPLIFY_SLOTS = threading.BoundedSemaphore(int(os.getenv("MAX_CONCURRENT_SIMPLIFY", "2")))
+SHADOW_SLOTS = threading.BoundedSemaphore(1)
+feedback_lock = threading.Lock()
+request_log_lock = threading.Lock()
+PII_PATTERNS = (
+    (re.compile(r"\b\d{6}[- ]?[1-8]\d{6}\b"), "[주민번호]"),
+    (re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}"), "[이메일]"),
+    (re.compile(r"(?<!\d)(?:\+?82[- ]?)?(?:0\d{1,2}|10)[- ]?\d{3,4}[- ]?\d{4}(?!\d)"), "[전화번호]"),
+)
+
+
+class Feedback(BaseModel):
+    model_version: str = Field(max_length=2000)
+    original: str = Field(max_length=2000)
+    simple: str = Field(max_length=2000)
+    vote: Literal["up", "down"]
+
+
+def xml_paragraph_text(data: bytes) -> str:
+    root = ElementTree.fromstring(data)
+    paragraphs = []
+    for paragraph in root.iter():
+        if paragraph.tag.rsplit("}", 1)[-1] == "p":
+            text = "".join(
+                node.text or ""
+                for node in paragraph.iter()
+                if node.tag.rsplit("}", 1)[-1] == "t"
+            )
+            if text.strip():
+                paragraphs.append(text)
+    return "\n".join(paragraphs)
+
+
+def extract_text(filename: str, data: bytes) -> str:
+    suffix = Path(filename).suffix.lower()
+    try:
+        if suffix == ".txt":
+            return data.decode("utf-8")
+        if suffix in {".docx", ".hwpx"}:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                if sum(archive.getinfo(name).file_size for name in archive.namelist()) > MAX_UNPACKED_BYTES:
+                    raise HTTPException(status_code=400, detail="Unpacked document exceeds 20 MB limit")
+                if suffix == ".docx":
+                    return xml_paragraph_text(archive.read("word/document.xml"))
+                sections = sorted(
+                    name for name in archive.namelist()
+                    if name.startswith("Contents/section") and name.endswith(".xml")
+                )
+                if not sections:
+                    raise ValueError("HWPX contains no document sections")
+                return "\n".join(xml_paragraph_text(archive.read(name)) for name in sections)
+        if suffix == ".pdf":
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(data))
+            if len(reader.pages) > MAX_PDF_PAGES:
+                raise HTTPException(status_code=400, detail="PDF exceeds 50-page limit")
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except HTTPException:
+        raise
+    except (UnicodeDecodeError, zipfile.BadZipFile, KeyError, ElementTree.ParseError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {suffix[1:].upper()} file: {exc}") from exc
+    except Exception as exc:
+        if suffix == ".pdf":
+            raise HTTPException(status_code=400, detail=f"Invalid PDF file: {exc}") from exc
+        raise
+    raise HTTPException(status_code=400, detail="Supported files: .txt, .docx, .hwpx, .pdf")
 
 
 @app.get("/health")
-def health() -> dict[str, list[str]]:
-    return {"model_versions": [MODEL_VERSION]}
+def health() -> dict:
+    return router.health()
 
 
-@app.post("/simplify")
-async def simplify(file: UploadFile = File(...)) -> dict:
-    if not file.filename or not file.filename.lower().endswith(".txt"):
-        raise HTTPException(status_code=400, detail="Only .txt files are supported")
+def redact(text: str) -> str:
+    for pattern, replacement in PII_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
-    try:
-        text = (await file.read()).decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail="File must be UTF-8 text") from exc
 
+def log_request(
+    request_id: str,
+    role: str,
+    version: str,
+    sentences: list[str],
+    outputs: list[str],
+    started: float,
+    error: str | None = None,
+) -> None:
+    record = {
+        "request_id": request_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "role": role,
+        "model_version": version,
+        "sentence_count": len(sentences),
+        "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+        "sentences": [
+            {"original": redact(original), "simple": redact(simple)}
+            for original, simple in zip(sentences, outputs)
+        ],
+    }
+    if error:
+        record["error"] = error
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with request_log_lock, (LOG_DIR / "requests.jsonl").open("a", encoding="utf-8") as log:
+        log.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def simplify_content(filename: str, data: bytes, request_id: str):
+    started = time.perf_counter()
+    version, role, model, shadow_version, shadow_model = router.select(request_id)
+    text = extract_text(filename, data)
     sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+|\n+", text) if part.strip()]
-    simplified = simplifier.simplify(sentences)
-    return {
-        "model_version": MODEL_VERSION,
+    if len(sentences) > MAX_SENTENCES:
+        raise HTTPException(status_code=400, detail="Document exceeds 500-sentence limit")
+    try:
+        simplified = model.simplify(sentences)
+    except Exception as exc:
+        log_request(request_id, role, version, sentences, [], started, type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Model inference failed") from exc
+    log_request(request_id, role, version, sentences, simplified, started)
+    payload = {
+        "model_version": version,
         "sentences": [
             {"original": original, "simple": simple}
             for original, simple in zip(sentences, simplified)
         ],
     }
+    return payload, sentences, shadow_version, shadow_model
+
+
+def run_shadow(request_id: str, version: str, model, sentences: list[str]) -> None:
+    started = time.perf_counter()
+    if not SHADOW_SLOTS.acquire(blocking=False):
+        log_request(request_id, "shadow", version, sentences, [], started, "shadow_busy")
+        return
+    try:
+        try:
+            output = model.simplify(sentences)
+        except Exception as exc:
+            log_request(request_id, "shadow", version, sentences, [], started, type(exc).__name__)
+        else:
+            log_request(request_id, "shadow", version, sentences, output, started)
+    finally:
+        SHADOW_SLOTS.release()
+
+
+@app.post("/simplify")
+async def simplify(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> dict:
+    if not SIMPLIFY_SLOTS.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="Server is busy; retry shortly", headers={"Retry-After": "1"})
+    try:
+        if not file.filename or Path(file.filename).suffix.lower() not in {".txt", ".docx", ".hwpx", ".pdf"}:
+            raise HTTPException(status_code=400, detail="Supported files: .txt, .docx, .hwpx, .pdf")
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=400, detail="File exceeds 5 MB limit")
+        if not data.strip():
+            raise HTTPException(status_code=400, detail="File is empty")
+        request_id = uuid.uuid4().hex
+        payload, sentences, shadow_version, shadow_model = await run_in_threadpool(
+            simplify_content, file.filename, data, request_id
+        )
+        if shadow_model is not None:
+            background_tasks.add_task(run_shadow, request_id, shadow_version, shadow_model, sentences)
+        return payload
+    finally:
+        SIMPLIFY_SLOTS.release()
+
+
+@app.post("/feedback")
+def feedback(item: Feedback) -> dict[str, bool]:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(item.model_dump(), ensure_ascii=False) + "\n"
+    with feedback_lock, (LOG_DIR / "feedback.jsonl").open("a", encoding="utf-8") as log:
+        log.write(line)
+    return {"saved": True}
+
+
+app.mount("/", StaticFiles(directory="web", html=True), name="web")

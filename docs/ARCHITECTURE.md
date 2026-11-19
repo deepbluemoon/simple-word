@@ -8,11 +8,15 @@
 |---|---|
 | 진입 | Route 53이 30초마다 Lightsail `/health`를 검사. 3번 실패하면 DNS를 GCP로 돌린다(장애 조치 라우팅). |
 | AWS (주) | Lightsail 인스턴스(2 vCPU·2GB): nginx(HTTPS) → FastAPI 라우터 → champion / canary / shadow. Lightsail 버킷: `models/`, `data/`, `registry.json`, `logs/`. 배포는 이 서버의 GitHub 셀프호스티드 러너가 실행. |
-| GCP (대기) | Cloud Run 최소 0대. 같은 Docker 이미지(Artifact Registry), 모델은 Cloud Storage 복제본에서 읽는다. champion만 서빙. 비밀값은 Secret Manager. |
+| GCP (대기) | Cloud Run 최소 1대(웜 대기). 같은 Docker 이미지(Artifact Registry), 모델은 Cloud Storage 복제본에서 읽는다. champion만 서빙. 비밀값은 Secret Manager. |
 | 학습 | Claude Max Mac(GitHub 셀프호스티드 러너 `trainer`): 수집·전처리·교사 생성·학습·평가. |
 | 모니터링 | RM `ops-dashboard`를 가져와 **서비스 서버 밖(사용자 Mac, 127.0.0.1)** 에서 실행. AWS는 SSH를 통한 Docker 조회, GCP는 Cloud Monitoring·Logging API를 조회 전용 계정으로 읽는다. 서비스 서버가 털려도 감시 도구와 그 자격 증명은 함께 털리지 않게 하기 위함. |
 
-장애 조치 예상 시간: 헬스체크 3회 실패(약 90초) + DNS TTL 60초. Cloud Run 첫 요청은 모델 로딩으로 몇 초 늦다. 실제 시간은 장애 훈련으로 잰다.
+장애 조치 예상 시간: Route 53 빠른 헬스체크(10초 간격) 3회 실패 + 짧은 DNS TTL. 실제 시간은 장애 훈련으로 잰다.
+
+- **확장**: Lightsail에는 오토스케일링이 없다. 대신 업로드 크기·압축 해제 크기·PDF 페이지·문장 수 상한, 동시 처리 수 제한과 넘치면 429로 거절(부하 차단)을 둔다. 더 커져야 하면 스냅샷으로 큰 플랜에 옮긴다(수직 확장). Cloud Run은 자동 확장하되 최대 대수를 정한다.
+- **GCP 대기 방식**: Cloud Run 최소 1대를 켜 둬서 장애 때 콜드 스타트 없이 바로 받는다.
+- **연쇄 다운 방지**: GCP에는 카나리를 올리지 않고, AWS에서 일정 시간 문제없이 돈 champion만 반영한다. 같은 버그가 두 클라우드를 동시에 죽이지 않게 하기 위함. 웹 화면의 재시도는 간격을 점점 늘린다.
 
 ## 데이터 파이프라인 (Claude Max Mac)
 
@@ -31,7 +35,8 @@
 ## 모델
 
 - 교사: Ollama `gemma3:27b` (Claude Max Mac, API 비용 없음)
-- 학생: KoBART 전체 파인튜닝(시퀀스 단위 지식 증류). 비교 후보: Qwen3-0.6B LoRA.
+- 학생: KoBART 전체 파인튜닝(시퀀스 단위 지식 증류). KoBART가 게이트 기준을 못 넘을 때만 Qwen3-0.6B LoRA를 시도한다.
+- 비교 기준선: 규칙 기반 용어 치환, gemma3:4b.
 - 서빙: ONNX INT8, 결정적 디코딩.
 
 ## 평가와 게이트
