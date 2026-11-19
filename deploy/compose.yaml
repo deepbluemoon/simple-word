@@ -1,21 +1,64 @@
 services:
   api:
+    image: ${IMAGE:-simple-word:local}
     build:
       context: ..
       dockerfile: Dockerfile
-    ports:
-      - "${HOST_PORT:-8000}:8000"
+    expose:
+      - "8000"
     volumes:
       - ${MODEL_DIR:-../models}:/app/models:ro
       - logs:/app/logs
     environment:
       LOG_DIR: /app/logs
       MAX_CONCURRENT_SIMPLIFY: ${MAX_CONCURRENT_SIMPLIFY:-2}
-    healthcheck:
+    healthcheck: &api_healthcheck
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8000/health')"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
       retries: 3
+      start_period: 10s
+
+  canary:
+    image: ${CANARY_IMAGE:-simple-word:canary}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    profiles: [canary]
+    expose:
+      - "8000"
+    ports:
+      - "${CANARY_PORT:-8001}:8000"
+    volumes:
+      - ${MODEL_DIR:-../models}:/app/models:ro
+      - canary_logs:/app/logs
+    environment:
+      LOG_DIR: /app/logs
+      MAX_CONCURRENT_SIMPLIFY: ${MAX_CONCURRENT_SIMPLIFY:-2}
+    healthcheck: *api_healthcheck
+
+  proxy:
+    image: ${PROXY_IMAGE:-simple-word-proxy:local}
+    build:
+      context: ..
+      dockerfile: deploy/proxy.Dockerfile
+    ports:
+      - "${HOST_PORT:-8000}:80"
+    environment:
+      CANARY_PERCENT: ${CANARY_PERCENT:-0}
+      CANARY_SPLIT_PERCENT: ${CANARY_SPLIT_PERCENT:-1}
+      CANARY_ENABLED: ${CANARY_ENABLED:-0}
+      NGINX_ENVSUBST_FILTER: '^(CANARY_SPLIT_PERCENT|CANARY_ENABLED)$'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
 volumes:
+  canary_logs:
   logs:

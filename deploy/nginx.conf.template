@@ -1,0 +1,24 @@
+resolver 127.0.0.11 ipv6=off valid=5s;
+
+split_clients "$request_id" $canary_backend {
+    ${CANARY_SPLIT_PERCENT}.0% canary;
+    * api;
+}
+
+map "$CANARY_ENABLED:$canary_backend" $selected_backend {
+    "~^0:" api;
+    default $canary_backend;
+}
+
+server {
+    listen 80;
+
+    location / {
+        add_header X-Simple-Word-Upstream $selected_backend always;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_next_upstream off;
+        proxy_pass http://$selected_backend:8000;
+    }
+}
