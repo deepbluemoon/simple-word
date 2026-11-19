@@ -1,4 +1,4 @@
-"""교사 짝 자동 검사: 숫자·날짜·금액·비율 일치, 보존 용어 유지, 대상·기한·조건 누락, 영어 단어 보존/사전 대체."""
+"""교사 짝 자동 검사(규칙을 바꾼 뒤 `python -m training.checks` 로 pairs.jsonl 다시 검사): 숫자·날짜·금액·비율 일치, 보존 용어 유지, 대상·기한·조건 누락, 영어 단어 보존/사전 대체."""
 import re
 
 from training.terms import found
@@ -41,8 +41,8 @@ def target_nouns(s):
 
 DEADLINE_SRC = re.compile(r"까지|이내|기한|마감")
 DEADLINE_TGT = re.compile(r"까지|이내|안에|안으로|기한|마감|전에|전까지")
-COND_SRC = re.compile(r"경우|조건|한하여|한해|단,")
-COND_TGT = re.compile(r"경우|때|면|조건|만|한해|한하여|단,")
+COND_SRC = re.compile(r"경우|조건|한하여|한해서|(?<![가-힣])단,")  # '공단,' 같은 기관명 끝은 제외
+COND_TGT = re.compile(r"경우|때|면|조건|만|한해|한하여|(?<![가-힣])단,")
 
 
 def check_pair(src, tgt, preserve, nikl):
@@ -62,3 +62,18 @@ def check_pair(src, tgt, preserve, nikl):
     c["english"] = {"ok": not eng, "missing": eng}
     fails = [k for k, v in c.items() if not v["ok"]]
     return {"checks": c, "passed": not fails, "reject_reason": ",".join(fails) or None}
+
+
+if __name__ == "__main__":
+    import json, sys
+    from pathlib import Path
+    from training.terms import nikl_dict, preserve_terms
+
+    data = Path(sys.argv[1] if len(sys.argv) > 1 else "data")
+    preserve, nikl = preserve_terms(), nikl_dict(data)
+    pairs = [json.loads(l) for l in (data / "pairs.jsonl").open(encoding="utf-8")]
+    for p in pairs:
+        if p["tgt"]:
+            p.update(check_pair(p["src"], p["tgt"], preserve, nikl))
+    (data / "pairs.jsonl").write_text("".join(json.dumps(p, ensure_ascii=False) + "\n" for p in pairs), encoding="utf-8")
+    print("passed", sum(p["passed"] for p in pairs), "/", len(pairs))
