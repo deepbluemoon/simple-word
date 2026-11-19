@@ -25,6 +25,18 @@ deploy/rollback.sh
 
 `rollback.sh`는 상태 파일의 직전 태그를 배포합니다. 되돌린 뒤 현재 태그를 상태 파일에 저장하므로 다시 실행하면 두 버전 사이를 전환할 수 있습니다.
 
+## GHCR 이미지 태그
+
+`.github/workflows/release.yml`은 `main` push와 `v*` 태그 push에서만 GHCR에 이미지를 push합니다. 모든 이미지에 `sha-<짧은 SHA>` 태그를 붙이고, main push에는 `main`, 버전 태그 push에는 `v1.2.3`처럼 원래 버전 태그도 붙입니다. PR 빌드는 기존 `ci.yml`의 Docker job에서 수행하며 이미지를 push하지 않습니다. 이 workflow에는 배포 단계가 없습니다.
+
+main의 특정 커밋을 Lightsail에 배포할 때는 짧은 SHA 태그를 전달합니다.
+
+```sh
+deploy/deploy.sh ghcr.io/deepbluemoon/simple-word:sha-1a2b3c4
+```
+
+이 명령은 앞의 Lightsail 환경 변수(`DEPLOY_HOST`, `DEPLOY_USER` 등)가 설정된 상태에서 사용합니다. GHCR 로그인 권한은 원격 호스트의 Docker credential store에 준비하고 비밀값은 저장소에 커밋하지 마세요.
+
 ## Canary 배포
 
 ```sh
