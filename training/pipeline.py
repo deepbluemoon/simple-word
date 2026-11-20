@@ -207,7 +207,7 @@ def _evaluate(ctx):
 def _gate(ctx):
     from gate.gate import run_gate
     run = ctx.state["run"]
-    result = run_gate(run["champion"], run["version"], ctx.models_dir, ctx.reports_dir)
+    result = run_gate(run["champion"], run["version"], ctx.models_dir, ctx.reports_dir, data_dir=ctx.data_dir)
     run["gate"] = {"passed": result["passed"], "reasons": result["reasons"], "evaluated_at": result["evaluated_at"],
                    "champion": result["champion"], "candidate": result["candidate"]}
     return run["gate"]

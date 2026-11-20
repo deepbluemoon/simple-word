@@ -195,6 +195,11 @@
 - 업로드·붙여넣기 흐름에 429 재시도 안내와 5MB 초과·지원하지 않는 형식·100문장 초과 오류 사례를 추가.
 - 로컬 검증: 프론트 단위 테스트 11개 통과, 프로덕션 빌드 성공, Playwright 6개 테스트 수집 확인. GitHub Actions nightly dispatch `44654161750` 전체 성공: browser-e2e 6 passed, integration 통과.
 
+## 47. 게이트 참조 기준 변경 (Codex)
+- `training/evaluate.py`에서 SARI와 `bert_score_ref`를 검수 정답 기준으로 계산하고, 원문 대비 BERTScore는 `bert_score_source` 진단값으로 보존. 원문 그대로와 교사 출력의 SARI·BERTScore 및 공백·조사 분리 근사 SARI도 기록.
+- 게이트가 champion과 후보를 동일 평가셋으로 재평가하고 SHA-1을 비교·보고하도록 변경. 이전 `bert_score` 메타데이터 키는 제거하며, 임계값 0.75는 유지하고 재검토 TODO를 문서화.
+- v2·v3 새 기준 재판정은 Max Mac에서 수행 예정. 명령: `python -m gate.gate v2 v3-base --models-dir models --reports-dir reports/gate-eval-reference --data-dir data`.
+
 ## 사용자 준비 (필요해질 때)
 - 클라우드: GCP 프로젝트·결제(`gcloud auth login`), 도메인(Route 53), Lightsail 2GB 인스턴스·버킷
 - #8 자동 학습: Max Mac `gh auth login`, 러너 토큰

@@ -4,11 +4,11 @@
     "preserved_terms_retention_rate": 1.0
   },
   "first_champion": {
-    "bert_score": 0.75,
+    "bert_score_ref": 0.75,
     "sentence_length_reduction_rate": -0.10
   },
   "at_least_champion": [
-    "bert_score",
+    "bert_score_ref",
     "sentence_length_reduction_rate"
   ],
   "at_most_champion": [
