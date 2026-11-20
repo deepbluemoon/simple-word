@@ -12,6 +12,9 @@ from training import checks
 from training.terms import found, nikl_dict, preserve_terms
 
 MODEL = "gemma3:27b"
+# 프롬프트 판: v1 = 국립국어원 사전(~2026-11-19 오후), v2-terms46 = #46 공통 사전(국립국어원 이표기 + 법제처 연계, 일반 용어 제외).
+# pairs.jsonl 각 짝의 "prompt"에 남긴다(없으면 v1).
+PROMPT_VERSION = "v2-terms46"
 OLLAMA = "http://localhost:11434/api/generate"
 ENGLISH = re.compile(r"[A-Za-z][A-Za-z0-9&+\-]*[A-Za-z0-9]")
 
@@ -83,7 +86,7 @@ def run(data_dir="data", limit=None, gen=generate, log=print, per_doc=None, rece
                 result = checks.check_pair(s["text"], tgt, preserve, nikl)
             else:  # 교사 출력 없음 → 짝 버림(이유 기록)
                 result = {"checks": {}, "passed": False, "reject_reason": "teacher_empty"}
-            pair = {"doc_id": s["doc_id"], "idx": s["idx"], "src": s["text"], "tgt": tgt, "teacher": f"ollama:{MODEL}", **result}
+            pair = {"doc_id": s["doc_id"], "idx": s["idx"], "src": s["text"], "tgt": tgt, "teacher": f"ollama:{MODEL}", "prompt": PROMPT_VERSION, **result}
             out.write(json.dumps(pair, ensure_ascii=False) + "\n")
             out.flush()
             done.add(s["text"])
