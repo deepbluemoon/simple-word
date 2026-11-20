@@ -84,7 +84,17 @@ def main():
             assert status == 200 and json.loads(payload)["sentences"], f"{filename}: HTTP {status} {payload!r}"
             print(f"PASS upload {filename}")
 
-        status, payload = request(url + "/feedback", json.dumps({"model_version": "integration-v1", "original": "a", "simple": "b", "vote": "up"}).encode(), {"Content-Type": "application/json"})
+        body, headers = multipart("feedback.txt", "통합 테스트 의견입니다.".encode())
+        status, payload = request(url + "/simplify", body, headers)
+        simplified = json.loads(payload)
+        sentence = simplified["sentences"][0]
+        feedback = {
+            "request_id": simplified["request_id"], "result_id": uuid.uuid4().hex,
+            "sentence_index": 0, "model_version": simplified["model_version"],
+            "original": sentence["original"], "simple": sentence["original"] if sentence["fallback"] else sentence["simple"],
+            "vote": "up",
+        }
+        status, payload = request(url + "/feedback", json.dumps(feedback).encode(), {"Content-Type": "application/json"})
         assert status == 200 and json.loads(payload)["saved"]
         print("PASS /feedback")
 
