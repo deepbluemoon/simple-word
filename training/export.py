@@ -135,7 +135,7 @@ def export(version, model_root="models", hf_dir=None, tokenizer_json=None, int8=
     meta = {"version": version, "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
             "data_snapshot": train_metrics.get("data_snapshot"), "base_model": train_metrics.get("base_model"),
             "metrics": {"train": train_metrics, "model_dir_mb": None},
-            "placeholders": simp.placeholders, "decoding": {"force_placeholders": force_placeholders}}
+            "placeholders": simp.placeholders, "decoding": {"force_placeholders": force_placeholders, "num_beams": 1}}
     (out / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     meta["metrics"]["model_dir_mb"] = dir_mb(out)  # hf/ 하위 폴더는 제외, 서빙에 올리는 파일만
     (out / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")

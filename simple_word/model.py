@@ -9,7 +9,7 @@ EOS = 1  # KoBART: bos = eos = decoder_start = 1
 
 
 class Simplifier:
-    """models/<version>/ 의 ONNX(INT8)를 onnxruntime(CPU)으로 불러 탐욕 디코딩(결정적, self-attention KV 캐시).
+    """models/<version>/ 의 ONNX(INT8)를 onnxruntime(CPU)으로 불러 결정적 디코딩(self-attention KV 캐시).
 
     artifact_dir 에 encoder.onnx 가 없을 때만 입력을 그대로 돌려주는 더미로 동작한다.
     숫자 안전장치: 출력의 숫자·날짜·금액·비율이 원문과 다르면(100분의 20 = 20% 는 같음) 그 문장은 원문을 돌려준다.
@@ -35,6 +35,13 @@ class Simplifier:
         self.tok.no_padding()
         self.tok.no_truncation()
         self.placeholders = self.tok.token_to_id("<N0>") is not None
+        try:
+            self.num_beams = int(json.loads((self.artifact_dir / "metadata.json").read_text(encoding="utf-8"))
+                                 .get("decoding", {}).get("num_beams", 1))
+        except (OSError, ValueError):
+            self.num_beams = 1
+        if self.num_beams < 1:
+            raise ValueError("metadata decoding.num_beams must be at least 1")
         # 자리표시자를 다 쓰기 전에는 EOS를 막을지: metadata.json decoding.force_placeholders (기본 False).
         # 켜면 fallback은 줄지만 빠진 숫자를 엉뚱한 문장에 붙여 뜻이 틀릴 수 있다 (docs/T6_V3.md 비교).
         if force_placeholders is None:
@@ -60,23 +67,32 @@ class Simplifier:
         for s in sentences:
             if getattr(self, "placeholders", False):
                 masked, slots = mask(s)
-                y = self._one(masked, slots=slots, force=getattr(self, "force_placeholders", False))
-                if y is not None:
-                    y = unmask(y, slots)
-                    if y is None:
-                        out.append((s, True, "placeholder"))
-                        continue
+                candidates = self._candidates(masked, slots, getattr(self, "force_placeholders", False))
             else:
-                y = self._one(s)
-            if y is None:
-                out.append((s, True, "length"))
-            elif numbers(y) != numbers(s):
-                out.append((s, True, "numbers"))
-            elif missing_terms(s, y, preserve_terms()):
-                out.append((s, True, "preserve"))
+                candidates = self._candidates(s)
+            reason = None
+            for candidate in candidates:
+                if candidate is None:
+                    reason = reason or "length"
+                    continue
+                y = unmask(candidate, slots) if getattr(self, "placeholders", False) else candidate
+                if y is None:
+                    reason = reason or "placeholder"
+                elif numbers(y) != numbers(s):
+                    reason = reason or "numbers"
+                elif missing_terms(s, y, preserve_terms()):
+                    reason = reason or "preserve"
+                else:
+                    out.append((y, False, None))
+                    break
             else:
-                out.append((y, False, None))
+                out.append((s, True, reason or "length"))
         return out
+
+    def _candidates(self, text, slots=None, force=False):
+        if getattr(self, "num_beams", 1) == 1:
+            return [self._one(text) if slots is None and not force else self._one(text, slots=slots, force=force)]
+        return self._beam(text, slots, force)
 
     def _one(self, text, max_len=256, slots=None, force=False):
         """탐욕 디코딩. slots(자리표시자 모델)를 주면 입력에 없는 자리표시자는 내지 않는다.
@@ -117,3 +133,53 @@ class Simplifier:
                 break
             out.append(nxt)
         return self.tok.decode(out[1:], skip_special_tokens=True).strip()
+
+    def _beam(self, text, slots=None, force=False, max_len=256):
+        """Cumulative log-probability 순으로 후보를 반환하며, encoder와 각 beam의 decoder KV를 유지한다."""
+        import numpy as np
+
+        ids = self.tok.encode(text, add_special_tokens=False).ids
+        if len(ids) > max_len - 1:
+            return [None]
+        ids = ids + [EOS]
+        x = np.array([ids], dtype=np.int64)
+        mask = np.ones_like(x)
+        cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})
+        feed = {"attention_mask": mask}
+        feed.update((o.name, c) for o, c in zip(self.encoder.get_outputs(), cross))
+        heads, hd = cross[0].shape[1], cross[0].shape[3]
+        past_names = [i.name for i in self.decoder.get_inputs() if i.name.startswith("past_")]
+        initial_past = [np.zeros((1, heads, 0, hd), dtype=np.float32) for _ in past_names]
+        need, banned = set(), []
+        if slots is not None:
+            ph = {t: self.tok.token_to_id(t) for t in PH_TOKENS}
+            need = {ph[t] for t in slots}
+            banned = [i for t, i in ph.items() if t not in slots and i is not None]
+        beams = [([EOS], 0.0, initial_past)]
+        finished = []
+        width = self.num_beams
+        for step in range(min(2 * len(ids) + 16, max_len)):
+            expanded = []
+            for tokens, score, past in beams:
+                feed.update(zip(past_names, past))
+                feed["input_ids"] = np.array([[tokens[-1]]], dtype=np.int64)
+                feed["position_ids"] = np.array([[step]], dtype=np.int64)
+                logits, *next_past = self.decoder.run(None, feed)
+                row = logits[0, -1].astype(np.float64)
+                row -= np.logaddexp.reduce(row)
+                if slots is not None:
+                    row[banned] = -np.inf
+                    if force and need - set(tokens):
+                        row[EOS] = -np.inf
+                token_ids = np.argsort(row)[-width:][::-1]
+                for token in token_ids:
+                    candidate = (tokens + [int(token)], score + float(row[token]), next_past)
+                    if token == EOS:
+                        finished.append(candidate)
+                    else:
+                        expanded.append(candidate)
+            beams = sorted(expanded, key=lambda beam: beam[1], reverse=True)[:width]
+            if not beams:
+                break
+        ranked = sorted(finished + beams, key=lambda beam: beam[1], reverse=True)[:width]
+        return [self.tok.decode(tokens[1:], skip_special_tokens=True).strip() for tokens, _, _ in ranked]
