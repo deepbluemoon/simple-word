@@ -193,7 +193,7 @@
 ## 46. Nightly 브라우저 E2E (codex2)
 - `.github/workflows/nightly.yml`에 PR CI와 분리된 브라우저 job 추가: 격리 Compose 서비스, Playwright 브라우저 캐시, 실패 trace·스크린샷 아티팩트.
 - 업로드·붙여넣기 흐름에 429 재시도 안내와 5MB 초과·지원하지 않는 형식·100문장 초과 오류 사례를 추가.
-- 로컬 검증: 프론트 단위 테스트 11개 통과, 프로덕션 빌드 성공, Playwright 6개 테스트 수집 확인. 전체 E2E와 nightly workflow 성공 확인은 원격 dispatch 결과를 기다림.
+- 로컬 검증: 프론트 단위 테스트 11개 통과, 프로덕션 빌드 성공, Playwright 6개 테스트 수집 확인. GitHub Actions nightly dispatch `44654161750` 전체 성공: browser-e2e 6 passed, integration 통과.
 
 ## 사용자 준비 (필요해질 때)
 - 클라우드: GCP 프로젝트·결제(`gcloud auth login`), 도메인(Route 53), Lightsail 2GB 인스턴스·버킷
