@@ -58,7 +58,9 @@ check_proxy_health() {
 }
 
 smoke_check() {
-    local args=()
-    [[ -n "${EXPECTED_MODEL_VERSION:-}" ]] && args+=(--expected-model-version "$EXPECTED_MODEL_VERSION")
-    python3 "$DEPLOY_DIR/../scripts/smoke.py" "$1" "${args[@]}"
+    if [[ -n "${EXPECTED_MODEL_VERSION:-}" ]]; then
+        python3 "$DEPLOY_DIR/../scripts/smoke.py" "$1" --expected-model-version "$EXPECTED_MODEL_VERSION"
+    else
+        python3 "$DEPLOY_DIR/../scripts/smoke.py" "$1"
+    fi
 }

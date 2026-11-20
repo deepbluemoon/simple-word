@@ -21,6 +21,12 @@ def test_smoke_accepts_model_version_numeric_text_and_fallback_flags():
     validate(*responses(), expected_model_version="v2")
 
     health, result = responses()
+    result["model_version"] = "not-loaded"
+    with pytest.raises(ValueError, match="not present in /health"):
+        validate(health, result)
+
+    health, result = responses()
+    health["model_versions"] = [{"version": "v1", "roles": ["champion"]}]
     result["model_version"] = "v1"
     with pytest.raises(ValueError, match="expected model v2"):
         validate(health, result, expected_model_version="v2")
