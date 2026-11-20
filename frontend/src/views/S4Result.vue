@@ -236,6 +236,7 @@ function reasonText(reason?: string | null) {
 .document-sentence:focus-visible { outline:2px solid var(--color-ink);outline-offset:2px }
 .document-sentence mark { padding:0 2px;border-radius:2px;background:var(--color-highlight);color:var(--color-ink);box-decoration-break:clone;-webkit-box-decoration-break:clone }
 .term-ruby { ruby-position:under;ruby-align:start }
+.term-ruby mark { display:inline-block }
 .term-ruby:focus-visible { outline:2px solid var(--color-ink);outline-offset:2px }
 .term-ruby rt { color:var(--color-gray-800);font-size:.68em;line-height:1.2;white-space:normal }
 .term-meaning { margin:var(--spacing-sm) 0;color:var(--color-gray-800) }
