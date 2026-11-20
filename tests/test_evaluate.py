@@ -31,7 +31,8 @@ def test_evaluate_scores_against_reference_and_records_diagnostics(tmp_path, mon
         def simplify_detailed(self, sentences):
             return [(s.replace("어려운", "쉬운"), False) for s in sentences]
 
-    monkeypatch.setattr("simple_word.model.Simplifier", Simplifier)
+    monkeypatch.setattr(evaluation, "simplify_timed",
+                        lambda _dir, srcs: ([s.replace("어려운", "쉬운") for s in srcs], [False] * len(srcs), [1.0] * len(srcs)))
     monkeypatch.setattr(evaluation, "_is_int8", lambda _path: True)
     monkeypatch.setattr(evaluation, "model_memory_mb", lambda *_args: 12.0)
     monkeypatch.setattr(evaluation, "nikl_dict", lambda *_args: {})
@@ -47,6 +48,8 @@ def test_evaluate_scores_against_reference_and_records_diagnostics(tmp_path, mon
     monkeypatch.setattr(evaluation, "bert_score_groups", fake_bert)
     model_dir = tmp_path / "models" / "v"
     model_dir.mkdir(parents=True)
+    for f in ("encoder.onnx", "decoder.onnx"):
+        (model_dir / f).write_bytes(b"")
     eval_dir = tmp_path / "data" / "eval"
     eval_dir.mkdir(parents=True)
     eval_path = eval_dir / "eval_set.jsonl"
@@ -145,3 +148,44 @@ def test_display_path_is_relative_to_data_dir(tmp_path):
     (data / "eval").mkdir(parents=True)
     assert _display_path(data / "eval" / "eval_set.jsonl", data) == "data/eval/eval_set.jsonl"
     assert _display_path(tmp_path / "other.jsonl", data) == "other.jsonl"
+
+
+def test_evaluate_checks_int8_before_any_work(tmp_path, monkeypatch):
+    import pytest
+    called = []
+    monkeypatch.setattr(evaluation, "simplify_timed", lambda *a: called.append("timed"))
+    monkeypatch.setattr(evaluation, "reference_diagnostics", lambda *a, **k: called.append("diag"))
+    monkeypatch.setattr(evaluation, "_is_int8", lambda _path: False)
+    model_dir = tmp_path / "models" / "v"
+    model_dir.mkdir(parents=True)
+    for f in ("encoder.onnx", "decoder.onnx"):
+        (model_dir / f).write_bytes(b"")
+    path = tmp_path / "eval.jsonl"
+    path.write_text(json.dumps({"src": "a", "ref": "b"}) + "\n")
+    with pytest.raises(ValueError, match="INT8"):
+        evaluation.evaluate("v", path, model_root=tmp_path / "models", data_dir=tmp_path)
+    assert called == []
+
+
+def test_diagnostics_cache_key_includes_candidates_and_write_failure_only_warns(tmp_path, monkeypatch):
+    import hashlib
+    import warnings
+    path = tmp_path / "eval_set.jsonl"
+    rows = [{"id": "e1", "src": "어려운 원문입니다.", "references": ["쉬운 말입니다.", "쉬운 글입니다."]}]
+    path.write_text(json.dumps(rows[0], ensure_ascii=False) + "\n", encoding="utf-8")
+    sha = hashlib.sha1(path.read_bytes()).hexdigest()
+    (tmp_path / "candidates.jsonl").write_text(json.dumps({"id": "e1", "teacher": "교사 1"}, ensure_ascii=False) + "\n", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(evaluation, "bert_score_groups", lambda groups: calls.append(1) or {k: 0.5 for k in groups})
+    evaluation.reference_diagnostics(rows, path, sha)
+    evaluation.reference_diagnostics(rows, path, sha)
+    assert len(calls) == 1
+    (tmp_path / "candidates.jsonl").write_text(json.dumps({"id": "e1", "teacher": "교사 2"}, ensure_ascii=False) + "\n", encoding="utf-8")
+    evaluation.reference_diagnostics(rows, path, sha)
+    assert len(calls) == 2  # candidates가 바뀌면 다시 계산
+    monkeypatch.setattr(evaluation.os, "replace", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    (tmp_path / "candidates.jsonl").write_text("", encoding="utf-8")
+    with warnings.catch_warnings(record=True) as got:
+        warnings.simplefilter("always")
+        assert evaluation.reference_diagnostics(rows, path, sha)["source_copy"]["count"] == 1
+    assert any("캐시를 쓰지 못함" in str(w.message) for w in got)

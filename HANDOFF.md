@@ -62,3 +62,11 @@
 - 폴백 문장의 화면·내려받기·피드백 출력을 원문으로 통일하고, API의 중복 `paragraph` 필드를 제거해 `paragraph_id`만 반환한다.
 - 핵심 업로드 E2E와 CSP 진행 표시 확인은 실제 API를 호출하고 실제 응답 문장·문단을 검사한다. 429 테스트만 가짜 응답을 사용한다.
 - 검증: API 30 passed, 프론트 단위 17 passed, 타입 검사·색상 검사·프로덕션 빌드 통과. 첫 E2E 실행에서 API 문장 분할 기대값이 잘못된 점을 고친 뒤 nightly run `44673712918`의 browser-e2e·rate-limit·integration 전체 통과. PR #68은 병합 전 총괄 리뷰 대기.
+
+## 2026-11-20 Claude Max 평가셋 v2·재판정
+- **평가셋 v2:** `data/eval/eval_set.jsonl`은 200문장, 문장마다 정답 2개(`references`), SHA-1 `8922190f`이다. v1은 `eval_set.v1.jsonl`(`e3455f4b`)에 남겼다. 규칙·예시·재생성 명령(`training.eval_set fill-v2`·`build-v2`)은 `docs/EVAL_SET.md`에 있다. 사람 검수가 아니라 Claude 검수다.
+- **게이트(평가셋 v2):** dummy→v2 PASS, v2→v3-base PASS(SARI 0.4870 > 0.4794, bert_score_ref 0.8366 ≥ 0.8346, 어려운 용어 0.50 ≤ 0.60, p95 82.6ms, 메모리 267.6MB).
+- **v3-base 등록:** canary 후보(weight 0, `pending_canary`)로만 등록했다(로컬 `.worktrees/v3/models/registry.json`). **champion은 v2 그대로**이고, 클라우드 registry 반영과 카나리·섀도 검증은 배포 단계에서 한다.
+- **메모리 주의:** 모델 메모리가 상한 300MB에 가깝다(v2 269.8MB, 다른 작업과 동시에 재면 287MB). 게이트를 돌릴 때는 교사 LLM 같은 무거운 작업을 멈춘다.
+- **지연 측정:** 별도 프로세스에서 잰다(BERTScore·champion 평가가 끼지 않게, #69 후속).
+- **#59 되돌림(#67):** 그 사이(12:49~) main으로 잰 fallback·숫자 일치 값은 버리고 `655cd05` 기준으로 다시 쟀다.

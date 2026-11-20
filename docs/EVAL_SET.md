@@ -63,15 +63,18 @@ v1 정답은 원문을 조금만 고친 문장이 많아서, 원문을 그대로
 
 ```bash
 # 1. v1에서 뺀 7자리를 같은 층의 새 문장으로 채움 → data/eval/fill_v2.jsonl (SHA-1 fb5d333e)
-python -m training.eval_set fill-v2 --splits data/v2 data/v3-base
+python -m training.eval_set fill-v2 --splits data/v2 data/v3-base data/v3-ph
 # 2. 정답 CSV(id, 원문, 정답1, 정답2[, 정답3], 메모) + v1 + 채움 → data/eval/eval_set.jsonl (SHA-1 8922190f)
 python -m training.eval_set build-v2 --v1 data/eval/eval_set.v1.jsonl --fill data/eval/fill_v2.jsonl --csv data/eval/review_v2.csv
 ```
 
-`build-v2`는 다음 경우 멈춘다.
+`fill-v2`는 어느 층에서든 쓸 수 있는 문장이 채울 자리보다 적으면 멈춘다. `build-v2`는 다음 경우 멈춘다.
 - 원문 열이 평가셋·채움 문장과 다를 때
 - 정답이 2개 미만일 때
 - 정답이 원문과 같거나 정답끼리 같을 때
+- 정답 CSV에 v1·채움 문장의 id가 빠졌거나 두 번 있거나 모르는 id가 있을 때
+- v1과 채움 문장의 id가 겹칠 때
+- 결과가 200건(`--expect`)이 아닐 때
 
 ### 새 평가셋으로 다시 잰 결과
 
@@ -95,6 +98,11 @@ python -m training.eval_set build-v2 --v1 data/eval/eval_set.v1.jsonl --fill dat
 | CPU p95 ms/문장 (게이트 상한 1,000) | — | — | 91.6 | 82.6 | 82.6 | 1,244.3 |
 | 메모리 MB (게이트 상한 300) | — | — | 269.8 | 267.6 | 267.3 | 781.9 |
 
+- **학습 데이터와 겹침(확인함):** 평가셋 200문장 중 각 모델의 train·valid·test 분할과 같은 문장(정확히 같음·한글만 남겨 같음)은 v2·v3-base·v3-ph 모두 0건이다.
+  - 같은 보도자료(문서)를 공유하는 문장은 있다. v2 train과 164문장(valid 13, test 16), v3-base·v3-ph train과 6문장이다.
+  - v1 후보를 "v2가 쓰지 않은 문장"에서 뽑았기 때문에, v2는 같은 문서의 다른 문장을 학습에서 봤다. 그래서 v2 쪽이 조금 유리할 수 있다.
+  - v3-ph 분할은 v3-base와 같은 시간순 분할이다(자리표시자로 못 바꾼 짝은 학습 때만 뺐다). 그래서 v3-ph 평가도 학습 문장과 겹치지 않는다.
+  - `fill-v2`는 기본값으로 v2·v3-base·v3-ph 분할을 모두 뺀다. v3-ph를 더해도 채운 7문장과 SHA-1은 그대로다(`fb5d333e`, `8922190f`).
 - **메모리가 상한 300MB에 가깝다:** v2 269.8MB(상한의 90%), v3-base 267.6MB.
   - 앞선 실행(13:00, 교사 gemma3:27b·파이프라인과 동시에 잰 값)에서는 게이트 기록이 v2 211.8ms/287.1MB, v3-base 290.5ms/269.2MB였다. 다른 작업이 돌면 메모리 측정도 약 17MB 흔들린다.
   - 이 측정은 새 프로세스의 최대 RSS 증가분을 3번 재서 중앙값을 쓴다. 그래도 상한과의 여유가 30MB 안팎이다.
@@ -105,7 +113,10 @@ python -m training.eval_set build-v2 --v1 data/eval/eval_set.v1.jsonl --fill dat
   - 어려운 말을 쉬운 말로 바꾸면 임베딩이 오히려 멀어진다(오가노이드 대 인공 장기). 모델은 문장을 나누거나 꾸밈을 줄이면서 정답과 다른 표현을 쓰기도 해서 점수를 잃는다.
   - 그래서 BERTScore는 "뜻을 크게 잃지 않았는지" 보는 하한 검사로만 쓰고, 바꾼 정도는 SARI와 어려운 용어 유지율로 본다.
 - **빔 4(#60):** fallback 0.185→0.160, SARI +0.006, BERTScore +0.006, 길이 감소율 +0.04이다. 하지만 p95가 약 15배(1.24초)이고 메모리가 782MB라 게이트 상한(1,000ms, 300MB)을 둘 다 넘는다. 지금 CPU 서빙 설정에는 쓸 수 없다.
-- **원문·교사 진단은 평가셋 SHA-1별로 캐시한다:** `data/eval/eval_set.jsonl.diagnostics-<sha1 앞 12자>.json`. 캐시가 없을 때만 BERTScore 1,600쌍을 계산하고, 그것도 모델 지연 측정 전에 끝낸다.
+- **원문·교사 진단 캐시:** `data/eval/eval_set.jsonl.diagnostics-<키 앞 12자>.json`에 둔다.
+  - 키는 평가셋 SHA-1, 점수 코드(`training/evaluate.py`) SHA-1, `candidates.jsonl` SHA-1을 합친 것이다. 셋 중 하나라도 바뀌면 다시 계산한다.
+  - 임시 파일에 쓴 뒤 바꿔치기한다. 캐시를 읽거나 쓰지 못하면 경고만 하고 계산을 계속한다.
+- **지연(p95) 측정:** torch를 불러온 적 없는 새 프로세스에서 문장마다 잰다. 그래서 같은 게이트에서 앞서 돈 champion 평가나 BERTScore가 끼지 않는다. INT8 ONNX 확인은 다른 일보다 먼저 한다.
 
 ### 게이트 재판정 (새 평가셋)
 

@@ -2,8 +2,10 @@
 
 `python -m training.evaluate --version v1 [--test data/v1/test.jsonl]`
 """
-import argparse, collections, hashlib, json, re, statistics, subprocess, sys, time
+import argparse, collections, hashlib, json, os, re, statistics, subprocess, sys, tempfile, warnings
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
 
 from training.checks import numbers
 from training.terms import found, nikl_dict, preserve_terms
@@ -141,21 +143,47 @@ def _display_path(path, data_dir):
         return str(path) if not path.is_absolute() else path.name
 
 
+def _file_sha1(path):
+    path = Path(path)
+    return hashlib.sha1(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def diagnostics_key(test_path, eval_set_sha1):
+    """진단 캐시 키: 평가셋, 점수 코드(이 파일), 교사 출력을 찾는 candidates.jsonl. 셋 중 하나라도 바뀌면 다시 계산한다."""
+    parts = {"test_set_sha1": eval_set_sha1, "scorer_sha1": _file_sha1(__file__),
+             "candidates_sha1": _file_sha1(Path(test_path).with_name("candidates.jsonl"))}
+    return hashlib.sha1(json.dumps(parts, sort_keys=True).encode()).hexdigest(), parts
+
+
+def _write_atomic(path, text):
+    """임시 파일에 쓴 뒤 바꿔치기(동시에 쓰는 게이트가 반쯤 쓴 파일을 읽지 않게). 실패해도 경고만 한다(캐시일 뿐)."""
+    try:
+        fd, tmp = tempfile.mkstemp(dir=Path(path).parent, prefix=f".{Path(path).name}.", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except OSError as exc:
+        warnings.warn(f"진단 캐시를 쓰지 못함({path}): {exc}")
+
+
 def reference_diagnostics(rows, test_path, eval_set_sha1, with_bert=True):
-    """원문 그대로·교사 출력의 SARI·BERTScore(정답 대비). 평가셋에만 달려 있으므로 평가셋 SHA-1별로
-    <평가셋>.diagnostics-<sha1 앞 12자>.json에 캐시해 게이트마다 다시 계산하지 않는다."""
-    cache = Path(test_path).with_name(f"{Path(test_path).name}.diagnostics-{eval_set_sha1[:12]}.json")
-    if cache.is_file():
-        cached = json.loads(cache.read_text(encoding="utf-8"))
-        if cached.get("test_set_sha1") == eval_set_sha1 and (cached.get("with_bert") or not with_bert):
-            return cached["diagnostics"]
+    """원문 그대로·교사 출력의 SARI·BERTScore(정답 대비). 평가셋·점수 코드·candidates가 같으면 결과가 같으므로
+    <평가셋>.diagnostics-<키 앞 12자>.json에 캐시해 게이트마다 다시 계산하지 않는다. 캐시를 못 읽거나 못 써도 계산은 계속한다."""
+    key, parts = diagnostics_key(test_path, eval_set_sha1)
+    cache = Path(test_path).with_name(f"{Path(test_path).name}.diagnostics-{key[:12]}.json")
+    try:
+        cached = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else None
+    except (OSError, ValueError) as exc:
+        warnings.warn(f"진단 캐시를 읽지 못함({cache}): {exc}")
+        cached = None
+    if cached and cached.get("key") == key and (cached.get("with_bert") or not with_bert):
+        return cached["diagnostics"]
     diagnostics, groups = _reference_diagnostics(rows, test_path)
     if with_bert:
-        scores = bert_score_groups(groups)
-        for name, value in scores.items():
+        for name, value in bert_score_groups(groups).items():
             diagnostics[name]["bert_score_ref"] = value
-    cache.write_text(json.dumps({"test_set_sha1": eval_set_sha1, "with_bert": with_bert, "diagnostics": diagnostics},
-                                ensure_ascii=False, indent=1), encoding="utf-8")
+    _write_atomic(cache, json.dumps({"key": key, **parts, "with_bert": with_bert, "diagnostics": diagnostics},
+                                    ensure_ascii=False, indent=1))
     return diagnostics
 
 
@@ -165,7 +193,7 @@ def _reference_diagnostics(rows, test_path):
     candidates = {}
     if candidates_path.is_file():
         candidates = {r["id"]: r.get("teacher", "") for r in
-                      (json.loads(line) for line in candidates_path.read_text(encoding="utf-8").splitlines() if line)}
+                      (json.loads(line) for line in candidates_path.read_text(encoding="utf-8").splitlines() if line.strip())}
     teacher_rows = [(r["src"], r.get("teacher") or candidates.get(r.get("id"), ""), references(r)) for r in rows]
     teacher_rows = [(s, t, ref) for s, t, ref in teacher_rows if t]
 
@@ -192,10 +220,40 @@ print((resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before) / 2**20)  # 
 """
 
 
+def _child_env():
+    """자식 프로세스가 이 체크아웃의 simple_word를 불러오게(다른 체크아웃 설치본 말고)."""
+    return {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(ROOT), os.environ.get("PYTHONPATH")]))}
+
+
+LATENCY_PROBE = """import json, sys, time
+from simple_word.model import Simplifier
+simp = Simplifier(sys.argv[1])
+if simp.dummy:
+    sys.exit("dummy model")
+outs, fallbacks, ms = [], [], []
+for s in json.load(sys.stdin):
+    t = time.perf_counter()
+    [(o, fb)] = simp.simplify_detailed([s])
+    ms.append((time.perf_counter() - t) * 1000)
+    outs.append(o)
+    fallbacks.append(fb)
+print(json.dumps({"outs": outs, "fallbacks": fallbacks, "ms": ms}, ensure_ascii=False))
+"""
+
+
+def simplify_timed(model_dir, srcs):
+    """서빙과 같은 경로(숫자 안전장치 포함)로 한 문장씩 바꾸며 문장당 지연을 잰다. torch(BERTScore)를 불러온 적 없는
+    새 프로세스에서 재서, 같은 프로세스에서 앞서 돈 champion 평가·BERTScore가 지연 측정에 끼지 않게 한다."""
+    r = subprocess.run([sys.executable, "-c", LATENCY_PROBE, str(model_dir)], input=json.dumps(srcs, ensure_ascii=False),
+                       capture_output=True, text=True, check=True, env=_child_env())
+    d = json.loads(r.stdout.strip().splitlines()[-1])
+    return d["outs"], d["fallbacks"], d["ms"]
+
+
 def model_memory_mb(model_dir, sample):
     """새 프로세스에서 라이브러리 import 뒤 모델 불러오기+추론으로 늘어난 최대 RSS(MB)."""
-    runs = [subprocess.run([sys.executable, "-c", MEMORY_PROBE, str(model_dir), *sample], capture_output=True, text=True, check=True)
-            for _ in range(3)]  # 한 번 재면 ±30MB 흔들려서 3번의 중앙값
+    runs = [subprocess.run([sys.executable, "-c", MEMORY_PROBE, str(model_dir), *sample], capture_output=True, text=True, check=True,
+                           env=_child_env()) for _ in range(3)]  # 한 번 재면 ±30MB 흔들려서 3번의 중앙값
     return round(statistics.median(float(r.stdout.strip().splitlines()[-1]) for r in runs), 1)
 
 
@@ -214,28 +272,21 @@ def _is_int8(path):
 def evaluate(version, test_path, model_root="models", data_dir="data", with_bert=True, out=None):
     """out이 없으면 metadata.json metrics(게이트가 읽는 값)에 쓴다. out을 주면 그 JSON 파일에만 쓰고 metadata는 건드리지 않는다
     (예: 사람·Claude 검수 평가셋 지표). SARI와 bert_score_ref는 tgt/ref 기준이고, bert_score_source는 진단용이다."""
-    from simple_word.model import Simplifier
-
     model_dir = Path(model_root) / version
+    onnx_files = [model_dir / f for f in ("encoder.onnx", "decoder.onnx")]
+    if not all(f.is_file() for f in onnx_files) or not all(_is_int8(f) for f in onnx_files):  # 다른 일보다 먼저 확인
+        raise ValueError(f"{model_dir}: INT8 ONNX 모델이 아니다. 게이트 지표는 서빙과 같은 INT8 ONNX로만 계산한다")
     test_path = Path(test_path)
-    eval_set_sha1 = hashlib.sha1(test_path.read_bytes()).hexdigest()
-    rows = [json.loads(l) for l in test_path.read_text(encoding="utf-8").splitlines() if l]
+    raw = test_path.read_bytes()
+    eval_set_sha1 = hashlib.sha1(raw).hexdigest()
+    rows = [json.loads(l) for l in raw.decode("utf-8").splitlines() if l.strip()]
     if not rows:
         raise ValueError(f"{test_path}: evaluation set is empty")
     srcs, refs = [r["src"] for r in rows], [references(r) for r in rows]
+    outs, fallbacks, ms = simplify_timed(model_dir, srcs)  # 지연 측정 먼저, BERTScore(torch)는 그 뒤
     diagnostics = None
-    if all("ref" in row or "references" in row for row in rows):  # 지연 측정 전에 끝낸다(캐시 없을 때 BERTScore가 돈다)
+    if all("ref" in row or "references" in row for row in rows):
         diagnostics = reference_diagnostics(rows, test_path, eval_set_sha1, with_bert)
-    simp, outs, ms = Simplifier(str(model_dir)), [], []
-    if simp.dummy or not all(_is_int8(model_dir / f) for f in ("encoder.onnx", "decoder.onnx")):
-        raise ValueError(f"{model_dir}: INT8 ONNX 모델이 아니다. 게이트 지표는 서빙과 같은 INT8 ONNX로만 계산한다")
-    fallbacks = []
-    for s in srcs:
-        t = time.perf_counter()
-        [(o, fb)] = simp.simplify_detailed([s])  # 서빙과 같은 경로(숫자 안전장치 포함)
-        ms.append((time.perf_counter() - t) * 1000)
-        outs.append(o)
-        fallbacks.append(fb)
     m = text_metrics(srcs, outs, refs, preserve_terms(), nikl_dict(data_dir))
     if with_bert:
         bert_scores = bert_score_groups({"output_ref": (outs, refs), "output_source": (outs, srcs)})
