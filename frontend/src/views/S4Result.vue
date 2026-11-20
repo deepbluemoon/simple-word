@@ -16,6 +16,7 @@ const simpleOnly = ref(false)
 const copyMessage = ref('')
 const exportError = ref('')
 const paragraphs = computed(() => groupParagraphs(result.value?.sentences ?? []))
+const changedCount = computed(() => result.value?.sentences.filter((sentence) => sentence.original !== sentence.simple).length ?? 0)
 const easyText = computed(() => paragraphs.value.join('\n\n'))
 const sideBySideText = computed(() => result.value?.sentences.map((sentence, index) => `문장 ${index + 1}\n원문: ${sentence.original}\n쉬운 말: ${sentence.simple}`).join('\n\n') ?? '')
 
@@ -52,7 +53,7 @@ function reasonText(reason?: string | null) {
     </div>
     <template v-else>
       <div class="page-head"><div><p class="t-caption-sm muted">{{ result.filename }} · {{ new Date(result.created_at).toLocaleString('ko-KR') }}</p><h1 ref="heading" tabindex="-1" class="t-display-xl">쉬운 말로 바꾼 결과</h1></div><RouterLink class="btn btn-secondary" to="/">새 공문서 올리기</RouterLink></div>
-      <section class="section tight"><C1Rail :steps="[{ label: '공문서 올리기', state: 'done', info: { title: '올린 공문서', lines: [result.filename] } }, { label: '쉬운 말로 바꾸기', state: 'done', info: { title: '문장 바꾸기', lines: [`${result.sentences.length}개 문장을 확인했어요.`] } }, { label: '결과 확인', state: 'now' }]" /><p class="t-body-sm muted mt-md">{{ result.sentences.length }}개 문장 · 모델 {{ result.model_version }}</p></section>
+      <section class="section tight"><C1Rail :steps="[{ label: '공문서 올리기', state: 'done', info: { title: '올린 공문서', lines: [result.filename] } }, { label: '문장 나누기', state: 'done', info: { title: '나눈 문장', lines: [`${result.sentences.length}개 문장을 확인했어요.`] } }, { label: '쉬운 말로 바꾸기', state: 'done' }, { label: '완료', state: 'now' }]" /><p class="t-body-sm muted mt-md">{{ result.sentences.length }}개 문장 · 모델 {{ result.model_version }}</p></section>
 
       <section class="reader-toolbar" aria-label="결과 읽기와 내보내기">
         <div class="reader-group" role="group" aria-label="글자 크기">
@@ -72,6 +73,7 @@ function reasonText(reason?: string | null) {
         <article v-for="(paragraph, index) in paragraphs" :key="index" class="card reading-paragraph"><p>{{ paragraph }}</p></article>
       </section>
       <section v-else class="section tight sentence-list" :class="`reader-${readerSize}`" aria-label="문장별 바꾼 결과">
+        <header class="comparison-summary"><h2 class="t-heading-md">문장별 비교</h2><span class="t-body-sm muted">{{ changedCount }} / {{ result.sentences.length }}개 문장에서 말이 바뀌었어요</span></header>
         <article v-for="(sentence, index) in result.sentences" :key="index" class="card sentence-card" :data-sentence="index">
           <div class="sentence-head"><h2 class="t-heading-sm">문장 {{ index + 1 }}</h2><C5VerdictBadge :fallback="sentence.fallback" /></div>
           <ComparisonView :original="sentence.original" :simple="sentence.simple" />
@@ -84,15 +86,16 @@ function reasonText(reason?: string | null) {
 </template>
 
 <style scoped>
-.reader-toolbar { display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:var(--spacing-lg) 0;padding:12px;border:1px solid var(--color-hairline);border-radius:var(--rounded-lg);background:var(--color-paper) }
+.reader-toolbar { display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:var(--spacing-lg) 0;padding:12px;border:1px solid var(--color-gray-200);border-radius:var(--rounded-lg);background:var(--color-gray-100) }
 .reader-group { display:flex;gap:4px }
 .reader-group .btn { min-width:40px;padding:0 10px }
-.reader-group [aria-pressed="true"] { background:var(--color-ink);color:var(--color-on-primary) }
+.reader-group [aria-pressed="true"] { background:var(--color-ink);color:var(--color-white) }
 .reader-status { font-size:13px }
 .sentence-list,.easy-reading { display:grid;gap:var(--spacing-lg) }
+.comparison-summary { display:flex;align-items:baseline;justify-content:space-between;gap:var(--spacing-md);flex-wrap:wrap;padding:0 2px }
 .sentence-card { display:grid;gap:var(--spacing-md);padding:var(--spacing-xl) }
 .sentence-head { display:flex;align-items:center;justify-content:space-between;gap:12px }
-.fallback-reason { margin:0;color:var(--color-charcoal);font-size:.9em }
+.fallback-reason { margin:0;color:var(--color-gray-800);font-size:.9em }
 .reading-paragraph { padding:var(--spacing-xl) }
 .reading-paragraph p { margin:0;line-height:1.9 }
 .reader-small { font-size:14px }
@@ -103,7 +106,7 @@ function reasonText(reason?: string | null) {
 .reader-large :deep(.compare blockquote) { font-size:19px }
 .reader-small :deep(.feedback) { font-size:13px }
 .reader-large :deep(.feedback) { font-size:17px }
-.error-message { color:var(--color-danger) }
+.error-message { color:var(--color-error) }
 @media(max-width:400px) {
   .page-head { align-items:flex-start;flex-direction:column }
   .reader-toolbar > button { flex:1 1 calc(50% - 8px);min-width:0;white-space:normal;line-height:1.3;padding:8px }

@@ -209,6 +209,12 @@
 - 게이트가 champion과 후보를 동일 평가셋으로 재평가하고 SHA-1을 비교·보고하도록 변경. 이전 `bert_score` 메타데이터 키는 제거하며, 임계값 0.75는 유지하고 재검토 TODO를 문서화.
 - v2·v3 새 기준 재판정은 Max Mac에서 수행 예정. 명령: `python -m gate.gate v2 v3-base --models-dir models --reports-dir reports/gate-eval-reference --data-dir data`.
 
+## 49. 프론트 디자인 통일 (Codex)
+- 21st.dev의 12개 UI 패턴을 기존 Vue 화면에 반영하고, 재사용 코드는 가져오지 않음. 출처와 라이선스 확인 여부는 `docs/FRONTEND_REFERENCES.md`에 기록.
+- 색 토큰을 잉크·회색·성공·주의·오류 역할로 정리하고, 빌드에서 토큰 밖의 CSS 색상값을 차단. 비교 강조는 회색 바탕+밑줄, 상태는 문구와 점으로 함께 표시.
+- 최근 결과의 상대 시간, 바뀐 문장 수, 의견 확인 안내, 상태 라벨 및 4단계 진행 표시를 정리. 서버가 문장별 실시간 진행을 주지 않아 가짜 퍼센트 대신 indeterminate 상태를 사용.
+- 검증: 프론트 단위 테스트 13개와 프로덕션 빌드 통과. Playwright는 사용자 지침에 따라 로컬 스크린샷이 생기는 실행을 하지 않음.
+
 ## 사용자 준비 (필요해질 때)
 - 클라우드: GCP 프로젝트·결제(`gcloud auth login`), 도메인(Route 53), Lightsail 2GB 인스턴스·버킷
 - #8 자동 학습: Max Mac `gh auth login`, 러너 토큰

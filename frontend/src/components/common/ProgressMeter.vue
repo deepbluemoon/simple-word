@@ -10,7 +10,7 @@ const pct = computed(() => (props.percent == null ? null : Math.max(0, Math.min(
 <template>
   <div :class="['pm', { done, stopped }]" data-part="progress-meter">
     <div class="pm-top">
-      <span class="pm-pct" data-part="progress-percent">{{ pct == null ? '—' : `${pct}%` }}</span>
+      <span class="pm-pct" data-part="progress-percent">{{ pct == null ? '처리 중' : `${pct}%` }}</span>
       <span class="pm-text"><slot /></span>
     </div>
     <div
@@ -20,7 +20,7 @@ const pct = computed(() => (props.percent == null ? null : Math.max(0, Math.min(
       aria-valuemin="0"
       aria-valuemax="100"
       :aria-valuenow="pct ?? undefined"
-      :aria-valuetext="pct == null ? '준비 중' : `${pct}%`"
+      :aria-valuetext="pct == null ? '문서 처리 중' : `${pct}%`"
     >
       <span class="pm-fill" :style="{ transform: `scaleX(${(pct ?? 0) / 100})` }" />
     </div>
@@ -32,11 +32,11 @@ const pct = computed(() => (props.percent == null ? null : Math.max(0, Math.min(
 .pm { display: grid; gap: 10px; }
 .pm-top { display: flex; align-items: baseline; gap: var(--spacing-md); flex-wrap: wrap; }
 .pm-pct { font: 700 32px/1 var(--font-display); letter-spacing: -.03em; color: var(--color-ink); font-variant-numeric: tabular-nums; min-width: 3ch; }
-.pm-text { font: 400 15px/1.5 var(--font-sans); color: var(--color-charcoal); }
+.pm-text { font: 400 15px/1.5 var(--font-sans); color: var(--color-gray-800); }
 .pm-text :deep(b), .pm-text :deep(strong) { color: var(--color-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
-.pm-bar { position: relative; height: 8px; border-radius: var(--rounded-full); background: var(--color-surface-hover); overflow: hidden; }
+.pm-bar { position: relative; height: 8px; border-radius: var(--rounded-full); background: var(--color-gray-200); overflow: hidden; }
 .pm-fill { position: absolute; inset: 0; transform-origin: left center; background: var(--color-ink); border-radius: inherit; transition: transform .6s cubic-bezier(.22, 1, .36, 1); }
 .pm.done .pm-fill { background: var(--color-success); }
-.pm.stopped .pm-fill { background: var(--color-mute); }
+.pm.stopped .pm-fill { background: var(--color-gray-800); }
 @media (prefers-reduced-motion: reduce) { .pm-fill { transition: none; } }
 </style>
