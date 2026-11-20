@@ -15,5 +15,5 @@ for artifact in metadata.json encoder.onnx decoder.onnx; do
   gcloud_project storage ls "gs://$BUCKET/v2/$artifact" >/dev/null
 done
 
-gcloud_project run deploy simple-word --image="$IMAGE" --region="$REGION" --min=0 --max=2 --memory=1Gi --port=8000 --concurrency=2 --allow-unauthenticated --service-account="$RUNTIME_SA@$PROJECT.iam.gserviceaccount.com" --add-volume="mount-path=/app/models,type=cloud-storage,bucket=$BUCKET,readonly=true" --set-env-vars=MAX_CONCURRENT_SIMPLIFY=2
+gcloud_project run deploy simple-word --image="$IMAGE" --region="$REGION" --execution-environment=gen2 --min-instances=0 --max-instances=2 --memory=1Gi --port=8000 --concurrency=2 --allow-unauthenticated --service-account="$RUNTIME_SA@$PROJECT.iam.gserviceaccount.com" --add-volume="name=models,type=cloud-storage,bucket=$BUCKET,readonly=true" --add-volume-mount="volume=models,mount-path=/app/models" --set-env-vars=MAX_CONCURRENT_SIMPLIFY=2
 gcloud_project run services describe simple-word --region="$REGION" --format='value(status.url)'

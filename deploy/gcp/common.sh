@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROJECT=simple-word-515207
+PROJECT=${PROJECT:-simple-word-515207}
 REGION=asia-northeast3
 REPOSITORY=simple-word
 BUCKET=simple-word-515207-models

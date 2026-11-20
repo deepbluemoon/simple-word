@@ -259,8 +259,9 @@
   - Cloud Run 최소 1대로 바꿀지(예산 30 USD 안에서 가능, 첫 요청 지연 제거).
 
 ## 60. 3차 PR #73 재검토 시작
-- PR을 최신 main에 rebase하면서 `HANDOFF.md`, `TASKS.md`, `docs/PROGRESS.md`의 2차 기록 충돌을 해결한다. 최신 main의 Cloud Run 배포 완료 기록과 예산 30 USD 결정을 기준으로 유지한다.
-- #73의 셸 스크립트·IAM/WIF 변경은 지정 GCP 프로젝트만 대상으로 검증한다. Cloud Run 배포가 끝난 상태이므로 버킷 상태를 불필요하게 바꾸지 않는다.
+- PR을 최신 main에 rebase하면서 `HANDOFF.md`, `TASKS.md`, `docs/PROGRESS.md` 충돌을 해결했다. 최신 main의 Cloud Run 배포 완료 기록과 예산 30 USD 결정을 유지한다.
+- 예산은 같은 GCP budget ID를 39,937 KRW로 갱신했고 50/90/100% 알림이 유지됨을 확인했다. GCP 명령은 `--project simple-word-515207`로만 실행한다.
+- deploy volume/mount·gen2·min/max 플래그를 교정했다. setup 재실행은 버킷 공개 방지와 owner ID 제한 WIF를 재적용하고 deployer 읽기 권한을 보장한다. 예산 전용 실행으로 이번 검증 중 배포 버킷은 건드리지 않았다.
 
 ## 사용자 준비 (필요해질 때)
 - 클라우드: GCP 프로젝트·결제 완료, Lightsail 인스턴스·고정 IP·버킷 완료. 쓰지 않는 Route 53 호스팅 영역 삭제 필요
