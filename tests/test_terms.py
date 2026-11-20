@@ -82,3 +82,36 @@ def test_fetch_law_terms_without_key_or_with_auth_error(tmp_path, monkeypatch):
 def test_candidate_words_strip_josa_and_count():
     words = T.candidate_words(["귀책사유가 있는 경우 귀책사유를 확인", "해태하면 해태하는 자"], min_count=2)
     assert words[:1] == ["귀책사유"] and "해태" in words
+
+
+def test_fetch_law_terms_skips_network_errors(tmp_path, monkeypatch):
+    from training import terms
+
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    calls = []
+
+    def get(target, word, key):
+        calls.append((target, word))
+        if word == "나쁨":
+            raise TimeoutError("timed out")
+        return "<lstrmRltService></lstrmRltService>"
+
+    n = terms.fetch_law_terms(["나쁨", "좋음"], tmp_path, key="k", targets=("lstrmRlt",), get=get, delay=0, log=lambda m: None)
+    assert n == 1 and calls.count(("lstrmRlt", "나쁨")) == 3
+
+
+def test_law_terms_are_opt_in_and_strict_drops_daily_words(tmp_path):
+    import json
+    from training import terms as T
+
+    (tmp_path / "nikl_terms.csv").write_text("연번,단어_용어,이표기_오표기,대안어(안)\n1,거버넌스,,협치\n", encoding="utf-8")
+    lst = ('<lstrmRltService><법령용어><법령용어명>{h}</법령용어명><연계용어><일상용어명>{e}</일상용어명>'
+           '<용어관계코드>140301</용어관계코드></연계용어></법령용어></lstrmRltService>')
+    dly = '<dlytrmRltService><일상용어><일상용어명>지원</일상용어명></일상용어></dlytrmRltService>'
+    rows = [{"target": "lstrmRlt", "query": "제고", "xml": lst.format(h="제고", e="높임")},
+            {"target": "lstrmRlt", "query": "지원", "xml": lst.format(h="지원", e="뒷바라지")},
+            {"target": "dlytrmRlt", "query": "지원", "xml": dly}]
+    (tmp_path / "law_cache.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    assert not any(T.LAW_SOURCE in e["sources"] for e in T.nikl_dict(tmp_path).values())
+    assert {"제고", "지원"} <= set(T.law_dict(tmp_path))
+    assert set(T.law_dict(tmp_path, strict=True)) == {"제고"}

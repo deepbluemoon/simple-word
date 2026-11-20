@@ -152,7 +152,15 @@ def fetch_law_terms(words, data_dir="data", key=None, targets=LAW_TARGETS, get=_
             for target in targets:
                 if (target, word) in done:
                     continue
-                text = get(target, word, key).replace(key, "***")
+                for attempt in range(3):  # 네트워크 오류(시간 초과 등)는 세 번까지 다시 시도, 그래도 안 되면 이 낱말은 건너뜀
+                    try:
+                        text = get(target, word, key).replace(key, "***")
+                        break
+                    except OSError as exc:
+                        log(f"법제처 조회 실패({target}, {word}): {type(exc).__name__} — 재시도 {attempt + 1}/3")
+                        time.sleep(5 * (attempt + 1))
+                else:
+                    continue
                 if "<Response>" in text[:200] and ("검증에 실패" in text or "<result>" in text):
                     msg = re.search(r"<result>(.*?)</result>", text, re.S)
                     raise LawAuthError(f"법제처 API 인증 오류: {msg.group(1).strip() if msg else '알 수 없음'} "
@@ -165,19 +173,35 @@ def fetch_law_terms(words, data_dir="data", key=None, targets=LAW_TARGETS, get=_
     return n
 
 
-def law_dict(data_dir="data"):
-    """data/law_cache.jsonl(+ 보관 data/law_terms.xml)을 합친 법제처 사전."""
-    data, parts = Path(data_dir), []
+HANGUL_ALT = re.compile(r"^[가-힣 ]+$")
+DAILY_NAME = re.compile(r"<일상용어명>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</일상용어명>", re.S)
+
+
+def law_dict(data_dir="data", strict=False):
+    """data/law_cache.jsonl(+ 보관 data/law_terms.xml)을 합친 법제처 사전.
+    법제처 '동의어'는 양방향 동의어라 어려운 말→쉬운 말이 아니다(지원→뒷바라지, 국민→내국인, 계획→플랜).
+    strict: 법령용어→일상용어(lstrmRlt) 방향만, 그 법령용어가 일상용어로도 등록돼 있으면 빼고, 대안어는 한글만 남긴다."""
+    data, parts, daily = Path(data_dir), [], set()
     cache = data / "law_cache.jsonl"
-    if cache.exists():
-        for r in map(json.loads, cache.open(encoding="utf-8")):
-            try:
-                parts.append(parse_law_xml(r["xml"]))
-            except ET.ParseError:
-                continue
+    rows = list(map(json.loads, cache.open(encoding="utf-8"))) if cache.exists() else []
+    if strict:
+        for r in rows:
+            if r["target"] == "dlytrmRlt" and "dlytrmRltService" in r["xml"][:200]:
+                daily.update(n.strip() for n in DAILY_NAME.findall(r["xml"]))
+    for r in rows:
+        if strict and r["target"] != "lstrmRlt":
+            continue
+        try:
+            parts.append(parse_law_xml(r["xml"]))
+        except ET.ParseError:
+            continue
     if (data / "law_terms.xml").exists():
         parts.append(parse_law_xml((data / "law_terms.xml").read_text(encoding="utf-8")))
-    return merge_dicts(*parts) if parts else {}
+    out = merge_dicts(*parts) if parts else {}
+    if strict:
+        out = {t: {**e, "alternatives": alts} for t, e in out.items() if t not in daily
+               and (alts := [a for a in e["alternatives"] if HANGUL_ALT.match(a)])}
+    return out
 
 
 def merge_dicts(*dictionaries):
@@ -191,8 +215,10 @@ def merge_dicts(*dictionaries):
     return out
 
 
-def difficult_terms(data_dir="data"):
-    """원본이 있으면 내려받고, 허용 라이선스가 확인된 로컬 출처를 합친 사전."""
+def difficult_terms(data_dir="data", law=None):
+    """원본이 있으면 내려받고, 허용 라이선스가 확인된 로컬 출처를 합친 사전.
+    law: None(기본) = 국립국어원만, "raw" = 법제처 동의어 전부 더함, "strict" = law_dict(strict=True)를 더함.
+    교사·검사·평가(nikl_dict)는 기본값을 쓴다. 법제처 동의어는 측정용이다(docs/DIFFICULT_TERMS.md)."""
     data = Path(data_dir)
     nikl_path = data / "nikl_terms.csv"
     if not nikl_path.exists():
@@ -200,8 +226,8 @@ def difficult_terms(data_dir="data"):
         nikl_path.parent.mkdir(parents=True, exist_ok=True)
         nikl_path.write_bytes(_get(NIKL_FILE.format(id=file_id)))
     dictionaries = [parse_nikl(nikl_path.read_text(encoding="utf-8-sig"))]
-    if law := law_dict(data):
-        dictionaries.append(law)
+    if law and (extra := law_dict(data, strict=law == "strict")):
+        dictionaries.append(extra)
     return merge_dicts(*dictionaries)
 
 
@@ -234,6 +260,7 @@ if __name__ == "__main__":
     ap.add_argument("--fetch-law", action="store_true",
                     help="먼저 통과 짝·평가 후보 원문의 후보 낱말을 법제처 연계 API로 조회해 data/law_cache.jsonl에 쌓는다(LAW_OC 필요)")
     ap.add_argument("--min-count", type=int, default=2, help="후보 낱말 최소 출현 수")
+    ap.add_argument("--law", choices=["raw", "strict"], help="법제처 동의어를 사전에 더해 잰다(기본: 국립국어원만)")
     ap.add_argument("--limit", type=int, help="조회할 후보 낱말 수 상한(많이 나온 순)")
     args = ap.parse_args()
     read = lambda path: [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line]
@@ -246,7 +273,7 @@ if __name__ == "__main__":
             print("새로 받음", fetch_law_terms(words, args.data))
         except LawAuthError as exc:
             print(exc)
-    terms = difficult_terms(args.data)
+    terms = difficult_terms(args.data, law=args.law)
     by_source = {}
     for entry in terms.values():
         for source in entry["sources"]:
