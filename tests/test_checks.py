@@ -26,3 +26,19 @@ def test_checks_reject_long_or_multiline_teacher_output():
     assert reasons(src, "과태료를 줄여 줍니다.") is None  # 11자, 1.1배
     assert reasons(src, "과태료를 줄여 드려요. 꼭 확인하세요.") == "length"  # 1.3배 초과
     assert reasons(src, "과태료를\n줄여요.") == "multiline"
+
+
+def test_numbers_keep_their_dates_when_clauses_are_reordered():
+    src = "1월에는 30명이 지원금을 신청했고, 2월에는 50명이 같은 지원금을 신청했습니다."
+    reordered = "2월에는 50명이 같은 지원금을 신청했고, 1월에는 30명이 지원금을 신청했습니다."
+    swapped = "1월에는 50명이 지원금을 신청했고, 2월에는 30명이 같은 지원금을 신청했습니다."
+
+    assert reasons(src, reordered) is None
+    assert reasons(src, swapped) == "numbers"
+
+
+def test_repeated_equal_number_is_counted():
+    src = "지원금 10만 원을 신청한 사람에게 한 차례 지급합니다."
+    duplicated = "지원금 10만 원을 신청한 사람에게 10만 원을 한 차례 지급합니다."
+
+    assert reasons(src, duplicated) == "numbers"
