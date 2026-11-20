@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 30
     env:
       HOST_PORT: "8000"
-      MODEL_DIR: ${{ runner.temp }}/simpleword-e2e-models
+      MODEL_DIR: ${{ github.workspace }}/.tmp/simpleword-e2e-models
       IMAGE: simple-word:e2e
       PROXY_IMAGE: simple-word-proxy:e2e
     steps:
