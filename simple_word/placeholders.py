@@ -69,8 +69,48 @@ def unmask(text, slots):
     used = SLOT.findall(text)
     if set(used) != set(slots):
         return None
-    out = SLOT.sub(lambda m: slots[m.group(0)], text)
+    out = SLOT_JOSA.sub(lambda m: slots[m.group(1)] + fix_josa(slots[m.group(1)], m.group(2) or m.group(3)), text)
     return re.sub(r"\s+", " ", out).strip()
+
+
+# 숫자 읽기의 끝소리: 받침 있음 여부, ㄹ 받침 여부. 0으로 끝나면 영·십·백·천·만 모두 받침(ㄹ 아님).
+_DIGIT_FINAL = {"0": (True, False), "1": (True, True), "2": (False, False), "3": (True, False), "4": (False, False),
+                "5": (False, False), "6": (True, False), "7": (True, True), "8": (True, True), "9": (False, False)}
+_PAIRS = {"을": ("을", "를"), "를": ("을", "를"), "이": ("이", "가"), "가": ("이", "가"), "은": ("은", "는"),
+          "는": ("은", "는"), "과": ("과", "와"), "와": ("과", "와")}
+JOSA = r"(으로|로|을|를|이|가|은|는|과|와)"
+# 자리표시자 바로 뒤 조사. 으로/로는 뒤에 는·도·서·써·부터·의가 붙어도 되고, 나머지는 낱말 끝(한글이 이어지지 않음)일 때만.
+SLOT_JOSA = re.compile(rf"(<[NT]\d+>)(?:((?:으로|로)(?=는|도|서|써|부터|의|[^가-힣]|$))|((?:을|를|이|가|은|는|과|와)(?![가-힣])))?")
+
+
+def final_sound(word):
+    """(받침 있음, ㄹ 받침) — 낱말 마지막 소리. 한글은 (code-0xAC00)%28, 숫자는 읽는 소리, %는 '퍼센트'. 모르면 None."""
+    w = word.rstrip(" 」』)]’'\"")
+    if not w:
+        return None
+    ch = w[-1]
+    if "가" <= ch <= "힣":
+        jong = (ord(ch) - 0xAC00) % 28
+        return jong != 0, jong == 8
+    if ch.isdigit():
+        return _DIGIT_FINAL[ch]
+    if ch == "%":
+        return False, False
+    return None
+
+
+def fix_josa(word, josa):
+    """되돌린 낱말에 맞게 바로 뒤 조사를 고친다. 을/를, 이/가, 은/는, 과/와, 으로/로(ㄹ 받침은 '로')."""
+    if not josa:
+        return ""
+    sound = final_sound(word)
+    if sound is None:
+        return josa
+    batchim, rieul = sound
+    if josa in ("으로", "로"):
+        return "으로" if batchim and not rieul else "로"
+    pair = _PAIRS[josa]
+    return pair[0] if batchim else pair[1]
 
 
 def mask_pair(src, tgt, terms=None):
