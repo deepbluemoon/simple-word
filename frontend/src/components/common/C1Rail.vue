@@ -140,20 +140,20 @@ const rich = (t: string) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
 
 <style scoped>
 /* 끝난 단계 펼치기(2026-10-01) — 단계 버튼은 레일 모양 그대로 + ▾, 펼친 판은 레일 바로 아래에 옅게 떠오른다 */
-.step.has-info { font: inherit; cursor: pointer; background: transparent; border: 1px solid var(--color-hairline-strong); }
-.step.has-info:hover { border-color: var(--color-ink); background: var(--color-surface-soft); }
-.step.has-info.open { border-color: var(--color-ink); background: var(--color-surface-soft); }
-.step-caret { display: inline-block; margin-left: 2px; font-size: 13px; line-height: 1; color: var(--color-charcoal); transition: transform .2s ease-out; }
+.step.has-info { font: inherit; cursor: pointer; background: transparent; border: 1px solid var(--color-gray-300); }
+.step.has-info:hover { border-color: var(--color-ink); background: var(--color-gray-100); }
+.step.has-info.open { border-color: var(--color-ink); background: var(--color-gray-100); }
+.step-caret { display: inline-block; margin-left: 2px; font-size: 13px; line-height: 1; color: var(--color-gray-800); transition: transform .2s ease-out; }
 .step.has-info.open .step-caret { transform: rotate(180deg); }
-.rail-info { margin-top: var(--spacing-md); padding: var(--spacing-lg); border: 1px solid var(--color-hairline); border-radius: var(--rounded-lg); background: var(--color-canvas); display: grid; gap: var(--spacing-sm); }
+.rail-info { margin-top: var(--spacing-md); padding: var(--spacing-lg); border: 1px solid var(--color-gray-200); border-radius: var(--rounded-lg); background: var(--color-white); display: grid; gap: var(--spacing-sm); }
 .rail-info-head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-md); }
 .rail-info-title { margin: 0; font: 600 16px/1.4 var(--font-sans); color: var(--color-ink); }
-.rail-info-close { width: 32px; height: 32px; border: 0; border-radius: var(--rounded-full); background: transparent; color: var(--color-body); cursor: pointer; }
-.rail-info-close:hover { background: var(--color-surface-soft); color: var(--color-ink); }
-.rail-info-lines { margin: 0; padding-left: 18px; display: grid; gap: 4px; font: 400 14px/1.55 var(--font-sans); color: var(--color-charcoal); }
+.rail-info-close { width: 32px; height: 32px; border: 0; border-radius: var(--rounded-full); background: transparent; color: var(--color-gray-800); cursor: pointer; }
+.rail-info-close:hover { background: var(--color-gray-100); color: var(--color-ink); }
+.rail-info-lines { margin: 0; padding-left: 18px; display: grid; gap: 4px; font: 400 14px/1.55 var(--font-sans); color: var(--color-gray-800); }
 .rail-info-lines :deep(b) { color: var(--color-ink); font-weight: 700; }
-.rail-info-plabel { margin: var(--spacing-xs) 0 0; font: 600 12px/1.4 var(--font-sans); color: var(--color-body); }
-.rail-info-preview { margin: 0; padding: var(--spacing-md) var(--spacing-lg); border-left: 3px solid var(--color-hairline-strong); border-radius: 0 var(--rounded-sm) var(--rounded-sm) 0; background: var(--color-paper); display: grid; gap: 6px; max-height: 180px; overflow: auto; }
+.rail-info-plabel { margin: var(--spacing-xs) 0 0; font: 600 12px/1.4 var(--font-sans); color: var(--color-gray-800); }
+.rail-info-preview { margin: 0; padding: var(--spacing-md) var(--spacing-lg); border-left: 3px solid var(--color-gray-300); border-radius: 0 var(--rounded-sm) var(--rounded-sm) 0; background: var(--color-gray-100); display: grid; gap: 6px; max-height: 180px; overflow: auto; }
 .rail-info-preview p { margin: 0; font: 400 14px/1.6 var(--font-sans); color: var(--color-ink); }
 /* 단계 바꿔 보기 — 옛 내용과 새 내용을 같은 칸에 겹쳐 엇갈려 미끄러뜨린다(transform · opacity 만) */
 .rail-info-track { display: grid; }

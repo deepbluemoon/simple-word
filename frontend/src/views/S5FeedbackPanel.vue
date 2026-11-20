@@ -20,13 +20,14 @@ async function send(value: 'up' | 'down') {
     <span class="t-caption-sm muted">이 문장이 도움이 됐나요?</span>
     <button type="button" class="btn btn-secondary" :disabled="busy" :aria-pressed="vote === 'up'" @click="send('up')">👍 좋아요</button>
     <button type="button" class="btn btn-secondary" :disabled="busy" :aria-pressed="vote === 'down'" @click="send('down')">👎 아쉬워요</button>
-    <span v-if="vote" class="t-caption-sm" role="status">의견을 보냈어요.</span><span v-if="error" class="error-message" role="alert">{{ error }}</span>
+    <span v-if="vote" class="feedback-success t-caption-sm" role="status" aria-live="polite">의견 감사합니다.</span><span v-if="error" class="error-message" role="alert">{{ error }}</span>
   </div>
 </template>
 
 <style scoped>
 .feedback { display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:var(--spacing-md) }
 .feedback .btn { height:34px;padding:0 12px;font-size:13px }
-.feedback [aria-pressed="true"] { background:var(--color-ink);color:var(--color-on-primary) }
-.error-message { color:var(--color-danger);font-size:13px }
+.feedback [aria-pressed="true"] { background:var(--color-ink);color:var(--color-white) }
+.feedback-success { padding:6px 10px;border:1px solid var(--color-gray-300);border-radius:var(--rounded-full);background:var(--color-gray-100);color:var(--color-ink) }
+.error-message { color:var(--color-error);font-size:13px }
 </style>

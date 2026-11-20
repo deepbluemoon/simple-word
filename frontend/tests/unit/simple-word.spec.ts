@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ApiError, sendFeedback, simplify } from '@/api/simpleWord'
 import C5VerdictBadge from '@/components/common/C5VerdictBadge.vue'
+import C11ModelServerState from '@/components/common/C11ModelServerState.vue'
+import S5FeedbackPanel from '@/views/S5FeedbackPanel.vue'
 import { findResult, readHistory, saveResult } from '@/stores/history'
 import { diffWords } from '@/lib/textDiff'
 import { groupParagraphs, readReaderSize, saveReaderSize } from '@/lib/reader'
@@ -65,6 +67,21 @@ describe('result display and local history', () => {
   it('labels fallback sentences as 원문 유지', () => {
     const wrapper = mount(C5VerdictBadge, { props: { fallback: true } })
     expect(wrapper.text()).toContain('원문 유지')
+    expect(wrapper.attributes('data-fallback')).toBe('true')
+  })
+
+  it('describes model health in text and marks delayed service accessibly', () => {
+    const wrapper = mount(C11ModelServerState, { props: { status: null, slow: true } })
+    expect(wrapper.text()).toContain('응답이 지연되고 있어요')
+    expect(wrapper.get('.status').attributes('aria-live')).toBe('polite')
+  })
+
+  it('shows feedback confirmation as a persistent live status after voting', async () => {
+    vi.spyOn(await import('@/api/simpleWord'), 'sendFeedback').mockResolvedValue(undefined)
+    const wrapper = mount(S5FeedbackPanel, { props: { modelVersion: 'v1', original: '원문', simple: '쉬운 말' } })
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.get('[role="status"]').text()).toBe('의견 감사합니다.')
+    expect(wrapper.get('button').attributes('aria-pressed')).toBe('true')
   })
 
   it('keeps recent results in local storage and restores an individual result', () => {
