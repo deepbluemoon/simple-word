@@ -21,7 +21,12 @@ MAX_LEN_RATIO = 1.3  # 교사 출력이 원문보다 이만큼 넘게 길면 탈
 def check_pair(src, tgt, preserve, nikl):
     c = {}
     ns, nt = numbers(src), numbers(tgt)
-    c["numbers"] = {"ok": ns == nt, "missing": sorted(ns - nt), "added": sorted(nt - ns)}
+    missing, added = ns - nt, nt - ns
+    c["numbers"] = {
+        "ok": not missing and not added,
+        "missing": sorted(f"{value} {unit} ({anchor})".strip() for (value, unit, anchor), n in missing.items() for _ in range(n)),
+        "added": sorted(f"{value} {unit} ({anchor})".strip() for (value, unit, anchor), n in added.items() for _ in range(n)),
+    }
     names = re.findall(r"[「『]([^「『」』]+)[」』]", src)  # 「」 안 법령·사업명도 그대로
     c["preserve"] = {"ok": not (m := missing_terms(src, tgt, preserve) + [t for t in names if t not in tgt]), "missing": m}
     miss = [f"대상:{n}" for n in target_nouns(src) if n not in tgt]
