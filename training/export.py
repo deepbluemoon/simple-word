@@ -112,7 +112,7 @@ def dir_mb(path):
     return round(sum(f.stat().st_size for f in Path(path).iterdir() if f.is_file()) / 2**20, 1)
 
 
-def export(version, model_root="models", hf_dir=None, tokenizer_json=None, int8=True):
+def export(version, model_root="models", hf_dir=None, tokenizer_json=None, int8=True, force_placeholders=False):
     from transformers import BartForConditionalGeneration
     from simple_word.model import Simplifier
 
@@ -128,13 +128,14 @@ def export(version, model_root="models", hf_dir=None, tokenizer_json=None, int8=
             shutil.move(tmp / f, out / f)
     shutil.copy(tokenizer_json or hf / "tokenizer.json", out / "tokenizer.json")
     train_metrics = json.loads((hf / "train_metrics.json").read_text()) if (hf / "train_metrics.json").exists() else {}
-    simp = Simplifier(str(out))
+    simp = Simplifier(str(out), force_placeholders=force_placeholders)  # parity는 서빙과 같은 디코딩 설정으로
     outputs = simp.simplify(PARITY_INPUTS)
     (out / "parity.jsonl").write_text("".join(json.dumps({"input": i, "output": o}, ensure_ascii=False) + "\n"
                                               for i, o in zip(PARITY_INPUTS, outputs)), encoding="utf-8")
     meta = {"version": version, "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
             "data_snapshot": train_metrics.get("data_snapshot"), "base_model": train_metrics.get("base_model"),
-            "metrics": {"train": train_metrics, "model_dir_mb": None}}
+            "metrics": {"train": train_metrics, "model_dir_mb": None},
+            "placeholders": simp.placeholders, "decoding": {"force_placeholders": force_placeholders}}
     (out / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     meta["metrics"]["model_dir_mb"] = dir_mb(out)  # hf/ 하위 폴더는 제외, 서빙에 올리는 파일만
     (out / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -145,5 +146,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", required=True)
     ap.add_argument("--models", default="models")
+    ap.add_argument("--force-placeholders", action="store_true", help="자리표시자를 다 쓰기 전 EOS 막기(서빙 설정으로 metadata에 기록)")
     a = ap.parse_args()
-    print(json.dumps(export(a.version, a.models)["metrics"]["model_dir_mb"]))
+    print(json.dumps(export(a.version, a.models, force_placeholders=a.force_placeholders)["metrics"]["model_dir_mb"]))

@@ -1,0 +1,24 @@
+{
+ "version": "v2",
+ "test": "/Users/pioneer13/simple-word/data/eval/eval_set.jsonl",
+ "metrics": {
+  "number_date_amount_match_rate": 1.0,
+  "preserved_terms_retention_rate": 1.0,
+  "difficult_term_retention_rate": 0.6316,
+  "sentence_length_reduction_rate": -0.081,
+  "sari": 0.3932,
+  "counts": {
+   "sentences": 193,
+   "preserved_terms": 39,
+   "difficult_terms": 19,
+   "difficult_terms_by_source": {
+    "국립국어원_15130006": 19
+   }
+  },
+  "bert_score": 0.8348,
+  "fallback_rate": 0.1917,
+  "cpu_p95_ms_per_sentence": 93.0,
+  "model_memory_mb": 271.4,
+  "eval_model": "onnx_int8_cpu"
+ }
+}

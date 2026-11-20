@@ -41,6 +41,19 @@ def leakage(splits, eval_texts=()):
             "eval_set_overlap": sum(t in exact or _near(t) in near for t in eval_texts)}
 
 
+def audit(splits):
+    """학습 짝 검사(모두 0이어야 학습한다): 개인정보(주민번호·이메일·전화, preprocess.PII)가 가려지지 않고 남은 짝,
+    교사 필터(training.checks: 여러 줄, 길이 1.3배 초과, 숫자 불일치)에 걸리는 짝."""
+    from training.checks import MAX_LEN_RATIO, numbers
+    from training.preprocess import PII
+
+    rows = [r for part in splits.values() for r in part]
+    return {"pii_unmasked": sum(any(p.search(r["src"]) or p.search(r["tgt"]) for p, _ in PII) for r in rows),
+            "multiline": sum("\n" in r["tgt"].strip() for r in rows),
+            "length_over": sum(len(r["tgt"]) > MAX_LEN_RATIO * len(r["src"]) for r in rows),
+            "numbers_mismatch": sum(numbers(r["src"]) != numbers(r["tgt"]) for r in rows)}
+
+
 def stop_epoch(valid_losses, patience=2):
     """early stopping: valid 손실이 patience 번 연속 최저를 못 넘으면 멈춘다. (멈출지, 가장 좋은 epoch 번호 1부터)"""
     best = min(range(len(valid_losses)), key=valid_losses.__getitem__)
@@ -82,8 +95,48 @@ def batches(data, size, tok, torch, shuffle_rng=None):
         yield x, (x != pad).long(), y
 
 
+def placeholder_rows(rows):
+    """짝을 자리표시자 형태로 (simple_word.placeholders). 교사가 숫자 모양을 바꿔 못 바꾸는 짝은 뺀다. → (rows, 뺀 수)"""
+    from simple_word.placeholders import mask_pair
+
+    out = []
+    for r in rows:
+        m = mask_pair(r["src"], r["tgt"])
+        if m:
+            out.append({**r, "src": m[0], "tgt": m[1]})
+    return out, len(rows) - len(out)
+
+
+def add_placeholder_tokens(tok):
+    """<N0>..<T9>를 일반 추가 토큰으로 넣고, 추가 토큰 뒤에 '▁'를 붙이지 않게 한다(<N0>원 ↔ <N0> 원 구별).
+    추가 토큰이 없는 글의 토큰화는 그대로다."""
+    from tokenizers import pre_tokenizers
+    from simple_word.placeholders import TOKENS
+
+    tok.add_tokens(TOKENS)
+    tok.backend_tokenizer.pre_tokenizer = pre_tokenizers.Metaspace(replacement="\u2581", prepend_scheme="first", split=True)
+    return tok
+
+
+def init_placeholder_embeddings(tok, model):
+    """새 토큰이 서로 비슷하게 시작하면 모델이 모두 <N0>으로 쓴다(v3-dry 첫 시도: fallback 43%).
+    <Nk>는 숫자 k 토큰('▁k', 10~19는 '▁10'…) 임베딩으로, <Tk>는 숫자 k와 '▁명칭'의 평균으로 시작해 서로 구별되게 한다.
+    마스킹 뒤 원문에는 숫자가 남지 않으므로 <Nk>와 진짜 숫자가 헷갈릴 일이 없다. KoBART는 입력·출력 임베딩을 공유한다."""
+    import torch
+    from simple_word.placeholders import MAX_N, MAX_T
+
+    emb = model.get_input_embeddings().weight
+    vid = lambda t: tok.convert_tokens_to_ids(t)
+    name = emb[vid("▁명칭")]
+    with torch.no_grad():
+        for k in range(MAX_N):
+            emb[vid(f"<N{k}>")] = emb[vid(f"▁{k}")]
+        for k in range(MAX_T):
+            emb[vid(f"<T{k}>")] = (emb[vid(f"▁{k}")] + name) / 2
+
+
 def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", model_root="models", split="hash", docs=None,
-          eval_set=None, patience=2):
+          eval_set=None, patience=2, placeholders=False):
     published = {}
     if docs:
         published = {d["id"]: d["published_at"] for d in map(json.loads, Path(docs).open(encoding="utf-8"))}
@@ -95,6 +148,9 @@ def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", mo
     leaks = leakage(splits, eval_texts)
     if any(v for k, v in leaks.items() if k != "parity_overlap"):
         raise ValueError(f"train과 valid/test가 겹친다: {leaks}")
+    audited = audit(splits)
+    if any(audited.values()):
+        raise ValueError(f"학습 짝 검사 실패(개인정보·교사 필터): {audited}")
 
     import torch
     from transformers import AutoTokenizer, BartForConditionalGeneration
@@ -104,10 +160,18 @@ def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", mo
     torch.use_deterministic_algorithms(True, warn_only=True)
     tok = AutoTokenizer.from_pretrained(BASE)
     model = BartForConditionalGeneration.from_pretrained(BASE)
+    fit = {"train": splits["train"], "valid": splits["valid"]}  # test는 원문 그대로 둔다(평가는 서빙 경로가 자리표시자를 처리)
+    ph_info = None
+    if placeholders:
+        add_placeholder_tokens(tok)
+        model.resize_token_embeddings(len(tok))
+        init_placeholder_embeddings(tok, model)
+        (fit["train"], d_train), (fit["valid"], d_valid) = placeholder_rows(fit["train"]), placeholder_rows(fit["valid"])
+        ph_info = {"dropped_train": d_train, "dropped_valid": d_valid, "vocab": len(tok)}
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr)
-    train_data, valid_data = encode(tok, splits["train"]), encode(tok, splits["valid"])
+    train_data, valid_data = encode(tok, fit["train"]), encode(tok, fit["valid"])
     rng, history, t0, best_epoch = random.Random(SEED), [], time.time(), epochs
     for epoch in range(epochs):
         model.train()
@@ -136,7 +200,8 @@ def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", mo
     tok.save_pretrained(out)
     metrics = {"base_model": BASE, "data_snapshot": str(snapshot), "device": device, "seed": SEED, "epochs": epochs,
                "lr": lr, "batch": batch, "train_seconds": round(time.time() - t0, 1),
-               "best_epoch": best_epoch, "patience": patience, "split": split, "sizes": {k: len(v) for k, v in splits.items()}, "leakage": leaks, "history": history}
+               "best_epoch": best_epoch, "patience": patience, "split": split, "sizes": {k: len(v) for k, v in splits.items()}, "leakage": leaks, "audit": audited, "history": history,
+               "placeholders": ph_info, "eval_set": str(eval_set) if eval_set else None}
     (out / "train_metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=1), encoding="utf-8")
     return metrics
 
@@ -152,12 +217,14 @@ if __name__ == "__main__":
     ap.add_argument("--docs", help="게시일을 읽을 docs.jsonl (--split time 에 필요)")
     ap.add_argument("--eval-set", help="사람 검수 평가셋 jsonl(src 필드) — train과 겹치면 학습 거부")
     ap.add_argument("--check-leakage", action="store_true", help="학습하지 않고 분할·누수 건수만 출력")
+    ap.add_argument("--placeholders", action="store_true", help="숫자·보존 용어를 자리표시자로 바꿔 학습(v3)")
     a = ap.parse_args()
     if a.check_leakage:
         pub = {d["id"]: d["published_at"] for d in map(json.loads, open(a.docs, encoding="utf-8"))} if a.docs else {}
         sp = make_splits(a.pairs, Path("data") / a.version, a.split, pub)
         ev = [json.loads(l)["src"] for l in open(a.eval_set, encoding="utf-8")] if a.eval_set else []
-        print(json.dumps({"sizes": {k: len(v) for k, v in sp.items()}, "leakage": leakage(sp, ev)}, ensure_ascii=False))
+        print(json.dumps({"sizes": {k: len(v) for k, v in sp.items()}, "leakage": leakage(sp, ev), "audit": audit(sp)}, ensure_ascii=False))
     else:
-        print(json.dumps(train(a.version, a.pairs, a.epochs, a.lr, a.batch, split=a.split, docs=a.docs, eval_set=a.eval_set),
+        print(json.dumps(train(a.version, a.pairs, a.epochs, a.lr, a.batch, split=a.split, docs=a.docs, eval_set=a.eval_set,
+                               placeholders=a.placeholders),
                          ensure_ascii=False))

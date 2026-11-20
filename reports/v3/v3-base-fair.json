@@ -1,0 +1,24 @@
+{
+ "version": "v3-base",
+ "test": "data/v3-base/test_fair.jsonl",
+ "metrics": {
+  "number_date_amount_match_rate": 1.0,
+  "preserved_terms_retention_rate": 1.0,
+  "difficult_term_retention_rate": 0.6667,
+  "sentence_length_reduction_rate": -0.0015,
+  "sari": 0.5892,
+  "counts": {
+   "sentences": 1204,
+   "preserved_terms": 373,
+   "difficult_terms": 30,
+   "difficult_terms_by_source": {
+    "국립국어원_15130006": 30
+   }
+  },
+  "bert_score": 0.826,
+  "fallback_rate": 0.064,
+  "cpu_p95_ms_per_sentence": 88.6,
+  "model_memory_mb": 267.1,
+  "eval_model": "onnx_int8_cpu"
+ }
+}
