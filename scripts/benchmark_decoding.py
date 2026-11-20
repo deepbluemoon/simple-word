@@ -12,6 +12,8 @@ import time
 import resource
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 def worker(model_dir, test_path, beams, rounds):
     from simple_word.model import Simplifier
@@ -35,7 +37,7 @@ def worker(model_dir, test_path, beams, rounds):
     p95 = latencies[math.ceil(len(latencies) * 0.95) - 1]
     return {"num_beams": beams, "sentences": len(sentences), "rounds": rounds,
             "p95_ms_per_sentence": round(p95, 1), "peak_rss_mib": round(peak_mib, 1),
-            "p95_under_1000ms": p95 <= 1000}
+            "p95_under_1000ms": p95 <= 1000, "peak_rss_under_300mib": peak_mib <= 300}
 
 
 def main():
@@ -59,7 +61,7 @@ def main():
                              check=True, capture_output=True, text=True)
         results.append(json.loads(run.stdout))
     print(json.dumps({"greedy": results[0], "beam": results[1],
-                      "p95_limit_ms": 1000,
+                      "p95_limit_ms": 1000, "peak_rss_limit_mib": 300,
                       "peak_rss_delta_mib": round(results[1]["peak_rss_mib"] - results[0]["peak_rss_mib"], 1)},
                      ensure_ascii=False, indent=2))
 

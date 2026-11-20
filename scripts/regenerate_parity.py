@@ -1,19 +1,32 @@
 """Regenerate a model's parity fixtures using its current metadata decoding settings."""
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from simple_word.model import Simplifier
-from training.export import PARITY_INPUTS
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from simple_word.model import Simplifier, _read_metadata
+from training.export import PARITY_INPUTS, _assert_parity, hf_reference_outputs
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version")
     parser.add_argument("--models-dir", default="models")
+    parser.add_argument("--hf-dir", help="HF checkpoint used as the independent parity reference")
     args = parser.parse_args()
     artifact = Path(args.models_dir) / args.version
-    outputs = Simplifier(str(artifact)).simplify(PARITY_INPUTS)
+    metadata = _read_metadata(artifact / "metadata.json")
+    num_beams = metadata.get("decoding", {}).get("num_beams", 1)
+    model = Simplifier(str(artifact))
+    outputs = hf_reference_outputs(args.hf_dir or artifact / "hf", PARITY_INPUTS, num_beams,
+                                   model.placeholders, model.force_placeholders)
+    actual = model.simplify(PARITY_INPUTS)
+    try:
+        _assert_parity(outputs, actual)
+    except RuntimeError as exc:
+        raise SystemExit(f"{exc}; parity was not overwritten") from exc
     path = artifact / "parity.jsonl"
     path.write_text("".join(json.dumps({"input": src, "output": out}, ensure_ascii=False) + "\n"
                                     for src, out in zip(PARITY_INPUTS, outputs)), encoding="utf-8")

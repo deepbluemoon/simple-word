@@ -94,8 +94,12 @@ def export_onnx(model, out_dir, opset=17):
         torch.onnx.export(Dec(), (torch.tensor([[5]]), torch.tensor([[2]]), m, *past, *cross), out_dir / "decoder.onnx",
                           input_names=["input_ids", "position_ids", "attention_mask", *kv_names("past"), *kv_names("cross")],
                           output_names=["logits", *kv_names("present")], opset_version=opset, dynamo=False,
-                          dynamic_axes={"attention_mask": {1: "src"}, **{n: {2: "past"} for n in kv_names("past")},
-                                        **{n: {2: "src"} for n in kv_names("cross")}, **{n: {2: "past1"} for n in kv_names("present")}})
+                          dynamic_axes={"input_ids": {0: "beam", 1: "tgt"}, "position_ids": {0: "beam", 1: "tgt"},
+                                        "attention_mask": {0: "beam", 1: "src"},
+                                        **{n: {0: "beam", 2: "past"} for n in kv_names("past")},
+                                        **{n: {0: "beam", 2: "src"} for n in kv_names("cross")},
+                                        "logits": {0: "beam", 1: "tgt"},
+                                        **{n: {0: "beam", 2: "past1"} for n in kv_names("present")}})
 
 
 def quantize(out_dir):
@@ -112,31 +116,100 @@ def dir_mb(path):
     return round(sum(f.stat().st_size for f in Path(path).iterdir() if f.is_file()) / 2**20, 1)
 
 
-def export(version, model_root="models", hf_dir=None, tokenizer_json=None, int8=True, force_placeholders=False):
-    from transformers import BartForConditionalGeneration
+def _generate_reference(model, tokenizer, inputs, num_beams, placeholders, force_placeholders):
+    import torch
+    from transformers import LogitsProcessor
+    from simple_word.numbers import numbers
+    from simple_word.placeholders import TOKENS, mask, unmask
+    from simple_word.terms import missing_terms, preserve_terms
+
+    if type(num_beams) is not int or num_beams < 1:
+        raise ValueError("num_beams must be an integer of at least 1")
+    vocab = tokenizer.get_vocab()
+    ph_ids = {term: vocab[term] for term in TOKENS if term in vocab}
+    outputs = []
+    for source in inputs:
+        masked, slots = mask(source) if placeholders else (source, [])
+        ids = tokenizer.encode(masked, add_special_tokens=False) + [1]
+        input_ids = torch.tensor([ids], dtype=torch.long)
+        bad_words = [[token_id] for token, token_id in ph_ids.items() if token not in slots]
+        logits_processors = []
+        required = {ph_ids[term] for term in slots if term in ph_ids} if force_placeholders else set()
+        if required:
+            class RequirePlaceholders(LogitsProcessor):
+                def __call__(self, generated, scores):
+                    scores = scores.clone()
+                    for row, sequence in enumerate(generated.tolist()):
+                        if not required.issubset(sequence):
+                            scores[row, 1] = -torch.inf
+                    return scores
+            logits_processors.append(RequirePlaceholders())
+        generated = model.generate(
+            input_ids=input_ids, attention_mask=torch.ones_like(input_ids), do_sample=False,
+            num_beams=num_beams, length_penalty=1.0, early_stopping=False,
+            max_new_tokens=min(2 * len(ids) + 16, 256), min_length=0,
+            decoder_start_token_id=1, eos_token_id=1, pad_token_id=3,
+            forced_bos_token_id=None, forced_eos_token_id=None,
+            bad_words_ids=bad_words or None, logits_processor=logits_processors or None,
+        )
+        text = tokenizer.decode(generated[0], skip_special_tokens=True).strip()
+        text = unmask(text, slots) if placeholders else text
+        if (text is None or not text or len(text) * 2 < len(source)
+                or numbers(text) != numbers(source)
+                or missing_terms(source, text, preserve_terms())):
+            text = source
+        outputs.append(text)
+    return outputs
+
+
+def hf_reference_outputs(hf_dir, inputs, num_beams, placeholders=False, force_placeholders=False):
+    from transformers import AutoTokenizer, BartForConditionalGeneration
+    model = BartForConditionalGeneration.from_pretrained(hf_dir).eval().cpu()
+    tokenizer = AutoTokenizer.from_pretrained(hf_dir)
+    return _generate_reference(model, tokenizer, inputs, num_beams, placeholders, force_placeholders)
+
+
+def _assert_parity(reference, actual):
+    if reference != actual:
+        mismatches = sum(expected != got for expected, got in zip(reference, actual)) + abs(len(reference) - len(actual))
+        first = next((index for index, pair in enumerate(zip(reference, actual)) if pair[0] != pair[1]), None)
+        detail = f"; first mismatch at {first}: HF={reference[first]!r}, ONNX={actual[first]!r}" if first is not None else ""
+        raise RuntimeError(f"HF generate parity mismatch: {mismatches}/{max(len(reference), len(actual))}{detail}")
+
+
+def export(version, model_root="models", hf_dir=None, tokenizer_json=None, int8=True, force_placeholders=False, num_beams=1):
+    from transformers import AutoTokenizer, BartForConditionalGeneration
     from simple_word.model import Simplifier
 
+    if type(num_beams) is not int or num_beams < 1:
+        raise ValueError("num_beams must be an integer of at least 1")
     out = Path(model_root) / version
     hf = Path(hf_dir or out / "hf")
     out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:  # 내보내기 중간 파일은 모델 폴더 밖에서
         tmp = Path(tmp)
-        export_onnx(BartForConditionalGeneration.from_pretrained(hf), tmp)
+        hf_model = BartForConditionalGeneration.from_pretrained(hf).eval().cpu()
+        hf_tokenizer = AutoTokenizer.from_pretrained(hf)
+        export_onnx(hf_model, tmp)
         if int8:
             quantize(tmp)
         for f in ("encoder.onnx", "decoder.onnx"):
             shutil.move(tmp / f, out / f)
     shutil.copy(tokenizer_json or hf / "tokenizer.json", out / "tokenizer.json")
     train_metrics = json.loads((hf / "train_metrics.json").read_text()) if (hf / "train_metrics.json").exists() else {}
-    simp = Simplifier(str(out), force_placeholders=force_placeholders)  # parity는 서빙과 같은 디코딩 설정으로
-    outputs = simp.simplify(PARITY_INPUTS)
-    (out / "parity.jsonl").write_text("".join(json.dumps({"input": i, "output": o}, ensure_ascii=False) + "\n"
-                                              for i, o in zip(PARITY_INPUTS, outputs)), encoding="utf-8")
     meta = {"version": version, "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
             "data_snapshot": train_metrics.get("data_snapshot"), "base_model": train_metrics.get("base_model"),
             "metrics": {"train": train_metrics, "model_dir_mb": None},
-            "placeholders": simp.placeholders, "decoding": {"force_placeholders": force_placeholders, "num_beams": 1}}
+            "placeholders": False, "decoding": {"force_placeholders": force_placeholders, "num_beams": num_beams}}
     (out / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    simp = Simplifier(str(out), force_placeholders=force_placeholders)  # parity는 서빙과 같은 디코딩 설정으로
+    meta["placeholders"] = simp.placeholders
+    outputs = _generate_reference(hf_model, hf_tokenizer, PARITY_INPUTS, num_beams,
+                                  simp.placeholders, force_placeholders)
+    actual = simp.simplify(PARITY_INPUTS)
+    _assert_parity(outputs, actual)
+    (out / "parity.jsonl").write_text("".join(json.dumps({"input": i, "output": o}, ensure_ascii=False) + "\n"
+                                              for i, o in zip(PARITY_INPUTS, outputs)), encoding="utf-8")
     meta["metrics"]["model_dir_mb"] = dir_mb(out)  # hf/ 하위 폴더는 제외, 서빙에 올리는 파일만
     (out / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return meta
@@ -147,5 +220,7 @@ if __name__ == "__main__":
     ap.add_argument("--version", required=True)
     ap.add_argument("--models", default="models")
     ap.add_argument("--force-placeholders", action="store_true", help="자리표시자를 다 쓰기 전 EOS 막기(서빙 설정으로 metadata에 기록)")
+    ap.add_argument("--num-beams", type=int, default=1)
     a = ap.parse_args()
-    print(json.dumps(export(a.version, a.models, force_placeholders=a.force_placeholders)["metrics"]["model_dir_mb"]))
+    print(json.dumps(export(a.version, a.models, force_placeholders=a.force_placeholders,
+                           num_beams=a.num_beams)["metrics"]["model_dir_mb"]))
