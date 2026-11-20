@@ -27,18 +27,34 @@ const sentenceDiffs = computed(() => (result.value?.sentences ?? []).map((senten
   diffWords(sentence.original, outputSentence(sentence)),
 ))
 function originalParts(parts: DiffPart[], terms: DifficultTerm[]) {
+  const original = parts.map((part) => part.text).join('')
+  const ranges: { start: number; end: number; changed: boolean }[] = []
   let offset = 0
-  return parts.flatMap((part) => {
-    const start = offset
+  for (const part of parts) {
+    ranges.push({ start: offset, end: offset + part.text.length, changed: part.kind === 'removed' })
     offset += part.text.length
-    const relevant = terms.filter((term) => term.start < offset && term.end > start)
-    const boundaries = [...new Set([start, offset, ...relevant.flatMap((term) => [Math.max(start, term.start), Math.min(offset, term.end)])])].sort((a, b) => a - b)
-    return boundaries.slice(0, -1).map((from, i) => {
-      const to = boundaries[i + 1]
-      const term = relevant.find((item) => item.start < to && item.end > from)
-      return { text: part.text.slice(from - start, to - start), highlighted: part.kind === 'removed' || Boolean(term), term }
-    })
-  })
+  }
+  const matches = terms.filter((term) => term.start >= 0 && term.end <= original.length && term.start < term.end)
+    .sort((a, b) => a.start - b.start || b.end - a.end)
+  const result: { text: string; highlighted: boolean; term?: DifficultTerm }[] = []
+  let cursor = 0
+  let partIndex = 0
+  let termIndex = 0
+  while (cursor < original.length) {
+    while (termIndex < matches.length && matches[termIndex].end <= cursor) termIndex++
+    const term = matches[termIndex]
+    if (term?.start === cursor) {
+      result.push({ text: original.slice(cursor, term.end), highlighted: true, term })
+      cursor = term.end
+      continue
+    }
+    while (partIndex < ranges.length && ranges[partIndex].end <= cursor) partIndex++
+    const part = ranges[partIndex]
+    const end = Math.min(part.end, term?.start != null && term.start > cursor ? term.start : original.length)
+    result.push({ text: original.slice(cursor, end), highlighted: part.changed })
+    cursor = end
+  }
+  return result
 }
 const documentParagraphs = computed(() => {
   let index = 0
@@ -58,10 +74,12 @@ const documentParagraphs = computed(() => {
   )
 })
 const selectedSentence = computed(() => selectedIndex.value == null ? null : result.value?.sentences[selectedIndex.value] ?? null)
+const selectedTerms = computed(() => selectedSentence.value?.terms ?? [])
 const changedCount = computed(() => result.value?.sentences.filter((sentence) => outputSentence(sentence) !== sentence.original).length ?? 0)
 const easyText = computed(() => paragraphs.value.join('\n\n'))
 const sideBySideText = computed(() => result.value?.sentences.map((sentence, index) => `문장 ${index + 1}\n원문: ${sentence.original}\n쉬운 말: ${outputSentence(sentence)}`).join('\n\n') ?? '')
 function setViewMode(mode: ViewMode) {
+  if (mode !== viewMode.value) selectedTerm.value = null
   viewMode.value = mode
   const index = (['simple', 'original', 'sentences'] as ViewMode[]).indexOf(mode)
   void nextTick(() => viewTabButtons[index]?.focus())
@@ -83,11 +101,7 @@ function selectSentence(event: MouseEvent | KeyboardEvent, index: number) {
   selectedTerm.value = result.value?.sentences[index].terms?.find((term) => term.text === termText) ?? null
 }
 function sourceLabel(source: string) {
-  return source.split(', ').map((id) => id === '국립국어원_15130006'
-    ? '국립국어원 공공언어 평가용 용어 목록 · 공공누리 제1유형'
-    : id === '법제처_법령정보지식베이스'
-      ? '법제처 법령용어-일상용어 연계 · 이용허락범위 제한 없음'
-      : id).join(' · ')
+  return source.split(', ').map((id) => result.value?.term_licenses?.[id] ?? id).join(' · ')
 }
 
 async function focusHeading() { await nextTick(); heading.value?.focus({ preventScroll: true }) }
@@ -149,7 +163,7 @@ function reasonText(reason?: string | null) {
           <p class="document-legend"><span class="change-swatch" aria-hidden="true" />노란 칸은 원문에서 바뀐 부분이에요. <span class="fallback-swatch" aria-hidden="true">원문 유지</span> 점선 밑줄은 원문을 그대로 둔 문장이에요.</p>
           <p v-for="(paragraph, paragraphIndex) in documentParagraphs" :key="paragraphIndex" class="document-paragraph">
             <template v-for="item in paragraph" :key="item.index">
-              <span tabindex="0" class="document-sentence" :class="{ selected: selectedIndex === item.index, fallback: item.sentence.fallback }" :aria-current="selectedIndex === item.index ? 'true' : undefined" :data-sentence="item.index" @click="selectSentence($event, item.index)" @keydown.enter.prevent="selectSentence($event, item.index)" @keydown.space.prevent="selectSentence($event, item.index)">
+              <span tabindex="0" role="button" :aria-pressed="selectedIndex === item.index" class="document-sentence" :class="{ selected: selectedIndex === item.index, fallback: item.sentence.fallback }" :aria-current="selectedIndex === item.index ? 'true' : undefined" :data-sentence="item.index" @click="selectSentence($event, item.index)" @keydown.enter.prevent="selectSentence($event, item.index)" @keydown.space.prevent="selectSentence($event, item.index)">
                 <template v-for="(part, partIndex) in item.simpleParts" :key="partIndex">
                   <mark v-if="part.highlighted"><span class="visually-hidden">바뀐 부분: </span>{{ part.text }}</mark><template v-else>{{ part.text }}</template>
                 </template>
@@ -162,20 +176,22 @@ function reasonText(reason?: string | null) {
           <template v-if="selectedSentence">
             <h2 class="t-heading-sm">선택한 문장</h2>
             <dl><dt>원문</dt><dd>{{ selectedSentence.original }}</dd></dl>
+            <div v-if="selectedTerms.length" class="term-list"><span class="t-caption-sm muted">문장 속 어려운 용어</span><button v-for="term in selectedTerms" :key="term.start" type="button" class="term-choice" :aria-pressed="selectedTerm?.text === term.text" @click="selectedTerm = term">{{ term.text }} → {{ term.easy.join(', ') }}</button></div>
+            <p v-if="selectedTerm" class="term-meaning">뜻: {{ selectedTerm.easy.join(', ') }}<small>출처: {{ sourceLabel(selectedTerm.source) }}</small></p>
             <p v-if="selectedSentence.fallback" class="fallback-reason">{{ reasonText(selectedSentence.fallback_reason) }}</p>
-            <S5FeedbackPanel :key="selectedIndex ?? -1" :result-id="result.id" :sentence-index="selectedIndex!" :model-version="result.model_version" :original="selectedSentence.original" :simple="outputSentence(selectedSentence)" />
+            <S5FeedbackPanel :key="selectedIndex ?? -1" :request-id="result.request_id ?? result.id" :result-id="result.id" :sentence-index="selectedIndex!" :model-version="result.model_version" :original="selectedSentence.original" :simple="outputSentence(selectedSentence)" />
           </template>
           <p v-else class="t-body-sm muted">문장을 누르거나 키보드로 선택하면 원문과 의견을 볼 수 있어요.</p>
         </aside>
       </section>
       <section v-else-if="viewMode === 'original'" id="original-panel" class="section tight document-layout" :class="`reader-${readerSize}`" aria-labelledby="original-tab" role="tabpanel">
         <article class="document-page" aria-label="원문 문서">
-          <p class="document-legend"><span class="change-swatch" aria-hidden="true" />노란 칸은 바뀐 부분 또는 어려운 용어예요. 아래에 쉬운 뜻을 표시해요. <a href="https://www.data.go.kr/data/15130006/fileData.do" target="_blank" rel="noreferrer">국립국어원 공공언어 용어 목록 · 공공누리 제1유형</a></p>
+          <p class="document-legend"><span class="change-swatch" aria-hidden="true" />노란 칸은 바뀐 부분 또는 어려운 용어예요. 아래에 쉬운 뜻을 표시해요. <span v-for="([source, license]) in Object.entries(result.term_licenses ?? {})" :key="source">{{ license }}</span></p>
           <p v-for="(paragraph, paragraphIndex) in documentParagraphs" :key="paragraphIndex" class="document-paragraph">
             <template v-for="item in paragraph" :key="item.index">
-              <span tabindex="0" class="document-sentence" :class="{ selected: selectedIndex === item.index }" :aria-current="selectedIndex === item.index ? 'true' : undefined" :data-sentence="item.index" @click="selectSentence($event, item.index)" @keydown.enter.prevent="selectSentence($event, item.index)" @keydown.space.prevent="selectSentence($event, item.index)">
+              <span tabindex="0" role="button" :aria-pressed="selectedIndex === item.index" class="document-sentence" :class="{ selected: selectedIndex === item.index }" :aria-current="selectedIndex === item.index ? 'true' : undefined" :data-sentence="item.index" @click="selectSentence($event, item.index)" @keydown.enter.prevent="selectSentence($event, item.index)" @keydown.space.prevent="selectSentence($event, item.index)">
                 <template v-for="(part, partIndex) in item.originalParts" :key="partIndex">
-                  <ruby v-if="part.term" tabindex="0" class="term-ruby" :data-term="part.term.text"><mark><span class="visually-hidden">{{ part.term.text }}, 뜻: {{ part.term.easy.join(', ') }}. 출처: {{ sourceLabel(part.term.source) }}. </span><span aria-hidden="true">{{ part.text }}</span></mark><rt aria-hidden="true">뜻: {{ part.term.easy.join(', ') }}</rt></ruby>
+                  <ruby v-if="part.term" class="term-ruby" :data-term="part.term.text"><mark><span class="visually-hidden">{{ part.term.text }}, 뜻: {{ part.term.easy.join(', ') }}. 출처: {{ sourceLabel(part.term.source) }}. </span><span aria-hidden="true">{{ part.text }}</span></mark><rt aria-hidden="true">뜻: {{ part.term.easy.join(', ') }}</rt></ruby>
                   <mark v-else-if="part.highlighted"><span class="visually-hidden">바뀐 부분: </span>{{ part.text }}</mark><template v-else>{{ part.text }}</template>
                 </template>
                 <span v-if="item.sentence.fallback" class="visually-hidden">원문 유지. </span>
@@ -188,9 +204,10 @@ function reasonText(reason?: string | null) {
             <h2 class="t-heading-sm">선택한 문장</h2>
             <h3 v-if="selectedTerm" class="t-heading-sm">{{ selectedTerm.text }}</h3>
             <p v-if="selectedTerm" class="term-meaning">뜻: {{ selectedTerm.easy.join(', ') }}<small>출처: {{ sourceLabel(selectedTerm.source) }}</small></p>
+            <div v-if="selectedTerms.length" class="term-list"><span class="t-caption-sm muted">문장 속 어려운 용어</span><button v-for="term in selectedTerms" :key="term.start" type="button" class="term-choice" :aria-pressed="selectedTerm?.text === term.text" @click="selectedTerm = term">{{ term.text }} → {{ term.easy.join(', ') }}</button></div>
             <dl><dt>원문</dt><dd>{{ selectedSentence.original }}</dd><dt>쉬운 말 전체</dt><dd>{{ outputSentence(selectedSentence) }}</dd></dl>
             <p v-if="selectedSentence.fallback" class="fallback-reason">{{ reasonText(selectedSentence.fallback_reason) }}</p>
-            <S5FeedbackPanel :key="selectedIndex ?? -1" :result-id="result.id" :sentence-index="selectedIndex!" :model-version="result.model_version" :original="selectedSentence.original" :simple="outputSentence(selectedSentence)" />
+            <S5FeedbackPanel :key="selectedIndex ?? -1" :request-id="result.request_id ?? result.id" :result-id="result.id" :sentence-index="selectedIndex!" :model-version="result.model_version" :original="selectedSentence.original" :simple="outputSentence(selectedSentence)" />
           </template>
           <p v-else class="t-body-sm muted">문장을 누르거나 키보드로 선택하면 원문과 의견을 볼 수 있어요.</p>
         </aside>
@@ -199,9 +216,9 @@ function reasonText(reason?: string | null) {
         <header class="comparison-summary"><h2 class="t-heading-md">문장별 비교</h2><span class="t-body-sm muted">{{ changedCount }} / {{ result.sentences.length }}개 문장에서 말이 바뀌었어요</span></header>
         <article v-for="(sentence, index) in result.sentences" :key="index" class="card sentence-card" :data-sentence="index">
           <div class="sentence-head"><h2 class="t-heading-sm">문장 {{ index + 1 }}</h2><C5VerdictBadge :fallback="sentence.fallback" :title="sentence.title" /></div>
-          <ComparisonView :original="sentence.original" :simple="outputSentence(sentence)" :diff="sentenceDiffs[index]" />
+          <ComparisonView :diff="sentenceDiffs[index]" />
           <p v-if="sentence.fallback" class="fallback-reason" data-part="fallback-reason">{{ reasonText(sentence.fallback_reason) }}</p>
-          <S5FeedbackPanel :result-id="result.id" :sentence-index="index" :model-version="result.model_version" :original="sentence.original" :simple="outputSentence(sentence)" />
+          <S5FeedbackPanel :request-id="result.request_id ?? result.id" :result-id="result.id" :sentence-index="index" :model-version="result.model_version" :original="sentence.original" :simple="outputSentence(sentence)" />
         </article>
       </section>
       <span class="visually-hidden" role="status" aria-live="polite">{{ selectedIndex == null ? '' : `문장 ${selectedIndex + 1} 선택됨${selectedTerm ? `, 어려운 용어 ${selectedTerm.text}` : ''}` }}</span>
@@ -237,8 +254,10 @@ function reasonText(reason?: string | null) {
 .document-sentence mark { padding:0 2px;border-radius:2px;background:var(--color-highlight);color:var(--color-ink);box-decoration-break:clone;-webkit-box-decoration-break:clone }
 .term-ruby { ruby-position:under;ruby-align:start }
 .term-ruby mark { display:inline-block }
-.term-ruby:focus-visible { outline:2px solid var(--color-ink);outline-offset:2px }
 .term-ruby rt { color:var(--color-gray-800);font-size:.68em;line-height:1.2;white-space:normal }
+.term-list { display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:var(--spacing-md) 0 }
+.term-choice { border:1px solid var(--color-gray-300);border-radius:var(--rounded-full);padding:4px 9px;background:var(--color-gray-100);color:var(--color-ink);font:inherit;font-size:var(--font-size-sm);cursor:pointer }
+.term-choice[aria-pressed="true"] { border-color:var(--color-ink);background:var(--color-white) }
 .term-meaning { margin:var(--spacing-sm) 0;color:var(--color-gray-800) }
 .term-meaning small { display:block;margin-top:4px }
 .document-sentence.fallback { text-decoration:underline dashed var(--color-gray-400);text-underline-offset:4px }

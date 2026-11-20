@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue'
+import { ref, useId } from 'vue'
 
-const props = defineProps<{ original: string; simple: string; diff: ReturnType<typeof import('@/lib/textDiff').diffWords> }>()
-const diff = computed(() => props.diff)
+import type { DiffPart } from '@/lib/textDiff'
+
+const props = defineProps<{ diff: { original: DiffPart[]; simple: DiffPart[] } }>()
 const helpId = `diff-help-${useId()}`
 const originalPane = ref<HTMLElement | null>(null)
 const simplePane = ref<HTMLElement | null>(null)
@@ -23,8 +24,8 @@ function syncScroll(source: HTMLElement | null, target: HTMLElement | null) {
 <template>
   <p :id="helpId" class="visually-hidden">원문에서 빠진 말과 쉬운 말에 더한 말은 회색 바탕과 밑줄로 표시해요. 같은 숫자와 날짜도 회색 바탕으로 표시해요.</p>
   <div class="compare" data-part="comparison" :aria-describedby="helpId">
-    <section><div class="col-head">원문</div><blockquote ref="originalPane" tabindex="0" aria-label="원문 문장" @scroll="syncScroll(originalPane, simplePane)"><template v-for="(part, index) in diff.original" :key="index"><del v-if="part.kind === 'removed'" :class="{ 'diff-number': part.numeric }">{{ part.text }}</del><span v-else :class="{ 'diff-number': part.numeric, 'preserved-number': part.numeric }">{{ part.text }}</span></template></blockquote></section>
-    <section><div class="col-head">쉬운 말</div><blockquote ref="simplePane" tabindex="0" aria-label="쉬운 말 문장" @scroll="syncScroll(simplePane, originalPane)"><template v-for="(part, index) in diff.simple" :key="index"><ins v-if="part.kind === 'added'" :class="{ 'diff-number': part.numeric }">{{ part.text }}</ins><span v-else :class="{ 'diff-number': part.numeric, 'preserved-number': part.numeric }">{{ part.text }}</span></template></blockquote></section>
+    <section><div class="col-head">원문</div><blockquote ref="originalPane" tabindex="0" aria-label="원문 문장" @scroll="syncScroll(originalPane, simplePane)"><template v-for="(part, index) in props.diff.original" :key="index"><del v-if="part.kind === 'removed'" :class="{ 'diff-number': part.numeric }">{{ part.text }}</del><span v-else :class="{ 'diff-number': part.numeric, 'preserved-number': part.numeric }">{{ part.text }}</span></template></blockquote></section>
+    <section><div class="col-head">쉬운 말</div><blockquote ref="simplePane" tabindex="0" aria-label="쉬운 말 문장" @scroll="syncScroll(simplePane, originalPane)"><template v-for="(part, index) in props.diff.simple" :key="index"><ins v-if="part.kind === 'added'" :class="{ 'diff-number': part.numeric }">{{ part.text }}</ins><span v-else :class="{ 'diff-number': part.numeric, 'preserved-number': part.numeric }">{{ part.text }}</span></template></blockquote></section>
   </div>
 </template>
 

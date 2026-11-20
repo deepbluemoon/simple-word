@@ -46,11 +46,11 @@ describe('Simple Word API', () => {
 
   it('posts sentence feedback with the server contract', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"saved":true}'))
-    await sendFeedback('v1', '원문', '쉬운 말', 'down')
+    await sendFeedback('request-1', 'result-1', 2, 'v1', '원문', '쉬운 말', 'down')
     expect(fetch).toHaveBeenCalledWith('/feedback', expect.objectContaining({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model_version: 'v1', original: '원문', simple: '쉬운 말', vote: 'down' }),
+      body: JSON.stringify({ request_id: 'request-1', result_id: 'result-1', sentence_index: 2, model_version: 'v1', original: '원문', simple: '쉬운 말', vote: 'down' }),
     }))
   })
 
@@ -116,15 +116,20 @@ describe('result display and local history', () => {
   })
 
   it('lets the user change a vote and announces the update once', async () => {
-    vi.spyOn(await import('@/api/simpleWord'), 'sendFeedback').mockResolvedValue(undefined)
-    const props = { resultId: 'feedback-test', sentenceIndex: 1, modelVersion: 'v1', original: '원문', simple: '쉬운 말' }
+    const send = vi.spyOn(await import('@/api/simpleWord'), 'sendFeedback').mockResolvedValue(undefined)
+    const props = { requestId: 'request-feedback', resultId: 'feedback-test', sentenceIndex: 1, modelVersion: 'v1', original: '원문', simple: '쉬운 말' }
     const wrapper = mount(S5FeedbackPanel, { props })
     await wrapper.get('button').trigger('click')
+    expect(send).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[role="status"]').text()).toBe('의견이 저장됐어요.')
     expect(wrapper.get('button').attributes('aria-pressed')).toBe('true')
     expect(getFeedbackVote(props.resultId, props.sentenceIndex)).toBe('up')
     expect(wrapper.get('[role="status"]').attributes('aria-live')).toBeUndefined()
+    await wrapper.get('button').trigger('click')
+    expect(send).toHaveBeenCalledTimes(1)
     await wrapper.findAll('button')[1].trigger('click')
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenLastCalledWith('request-feedback', 'feedback-test', 1, 'v1', '원문', '쉬운 말', 'down')
     expect(wrapper.get('[role="status"]').text()).toBe('의견을 변경했어요.')
     expect(getFeedbackVote(props.resultId, props.sentenceIndex)).toBe('down')
     const remounted = mount(S5FeedbackPanel, { props })
@@ -140,12 +145,23 @@ describe('result display and local history', () => {
   })
 
   it('prunes votes for results that fell out of recent history', () => {
-    for (let i = 0; i < 11; i++) saveResult({ id: `history-${i}`, filename: '안내.txt', model_version: 'v1', created_at: '2026-11-19T00:00:00Z', sentences: [] })
-    saveFeedbackVote('history-0', 0, 'up')
-    saveFeedbackVote('history-1', 0, 'down')
+    for (let i = 0; i < 11; i++) {
+      saveResult({ id: `history-${i}`, filename: '안내.txt', model_version: 'v1', created_at: '2026-11-19T00:00:00Z', sentences: [] })
+      saveFeedbackVote(`history-${i}`, 0, 'up')
+    }
     expect(readHistory()).toHaveLength(10)
     expect(getFeedbackVote('history-0', 0)).toBeNull()
-    expect(getFeedbackVote('history-1', 0)).toBe('down')
+    expect(getFeedbackVote('history-1', 0)).toBe('up')
+  })
+
+  it('does not prune votes when history is read after a failed save', () => {
+    storage.setItem = () => { throw new Error('storage full') }
+    const result = { id: 'memory-result', filename: '안내.txt', model_version: 'v1', created_at: '2026-11-19T00:00:00Z', sentences: [] }
+    saveResult(result)
+    saveFeedbackVote(result.id, 0, 'up')
+    expect(readHistory()).toEqual([])
+    expect(findResult(result.id)).toEqual(result)
+    expect(getFeedbackVote(result.id, 0)).toBe('up')
   })
 
   it('diffs changed words and marks identical numeric dates on both sides', () => {
@@ -178,27 +194,38 @@ describe('result display and local history', () => {
 
   it('opens the easy document, annotates original terms, and keeps keyboard tabs accessible', async () => {
     saveResult({
-      id: 'doc-view', filename: '안내.txt', model_version: 'v1', created_at: '2026-11-19T00:00:00Z',
+      id: 'doc-view', request_id: 'request-doc-view', term_licenses: { 국립국어원_15130006: '국립국어원 공공언어 평가용 용어 목록 · 공공누리 제1유형', 법제처_법령정보지식베이스: '법제처 법령용어-일상용어 연계 · 이용허락범위 제한 없음' }, filename: '안내.txt', model_version: 'v1', created_at: '2026-11-19T00:00:00Z',
       sentences: [
         { original: '익일 신청서를 제출해야 합니다.', simple: '다음 날 신청서를 내야 합니다.', fallback: false, paragraph_id: 0, terms: [{ text: '익일', start: 0, end: 2, easy: ['다음 날'], source: '국립국어원_15130006' }] },
-        { original: '수수료는 400원입니다.', simple: '수수료는 400원으로 산정합니다.', fallback: true, fallback_reason: 'numbers', paragraph_id: 1 },
+        { original: '스마트 그리드가 좋아요.', simple: '스마트 안내가 좋아요.', fallback: false, paragraph_id: 1, terms: [{ text: '스마트 그리드', start: 0, end: 7, easy: ['지능형 전력망'], source: 'law' }] },
+        { original: '수수료는 400원입니다.', simple: '수수료는 400원으로 산정합니다.', fallback: true, fallback_reason: 'numbers', paragraph_id: 2 },
       ],
     })
     const wrapper = mount(S4Result, { props: { id: 'doc-view' }, global: { stubs: { C1Rail: true, RouterLink: true } } })
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('쉬운 말로 읽기')
     expect(wrapper.find('#simple-panel .document-sentence').text()).toContain('신청서를')
-    expect(wrapper.findAll('#simple-panel .document-paragraph')[1].text()).toContain('수수료는 400원입니다.')
+    expect(wrapper.findAll('#simple-panel .document-paragraph')[2].text()).toContain('수수료는 400원입니다.')
     await wrapper.find('#sentences-tab').trigger('click')
-    expect(wrapper.get('.comparison-summary').text()).toContain('1 / 2개 문장에서 말이 바뀌었어요')
+    expect(wrapper.get('.comparison-summary').text()).toContain('2 / 3개 문장에서 말이 바뀌었어요')
     await wrapper.find('#original-tab').trigger('click')
     expect(wrapper.get('.term-ruby rt').text()).toBe('뜻: 다음 날')
+    expect(wrapper.findAll('.term-ruby')).toHaveLength(2)
+    expect(wrapper.get('.term-ruby mark > span[aria-hidden="true"]').text()).toBe('익일')
+    expect(wrapper.findAll('.term-ruby mark > span[aria-hidden="true"]')[1].text()).toBe('스마트 그리드')
     expect(wrapper.findAll('#original-panel .document-sentence')[0].text()).toContain('제출해야')
     await wrapper.get('.term-ruby').trigger('click')
     expect(wrapper.get('.clause-note').text()).toContain('국립국어원 공공언어 평가용 용어 목록 · 공공누리 제1유형')
+    expect(wrapper.get('.document-legend').text()).toContain('법제처 법령용어-일상용어 연계 · 이용허락범위 제한 없음')
     expect(wrapper.get('.clause-note').text()).toContain('다음 날 신청서를 내야 합니다.')
+    await wrapper.find('#simple-tab').trigger('click')
+    expect(wrapper.findAll('.term-choice[aria-pressed="true"]')).toHaveLength(0)
+    await wrapper.find('#original-tab').trigger('click')
+    expect(wrapper.findAll('.term-choice[aria-pressed="true"]')).toHaveLength(0)
     expect(wrapper.find('.document-sentence').element.tagName).toBe('SPAN')
-    expect(wrapper.find('.document-sentence').attributes('role')).toBeUndefined()
-    await wrapper.findAll('.document-sentence')[1].trigger('keydown.enter')
+    expect(wrapper.find('.document-sentence').attributes('role')).toBe('button')
+    expect(wrapper.find('.document-sentence').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('.term-ruby').attributes('tabindex')).toBeUndefined()
+    await wrapper.findAll('.document-sentence')[2].trigger('keydown.enter')
     expect(wrapper.get('.clause-note').text()).toContain('숫자나 날짜를 안전하게 지키려고 원문을 유지했어요.')
     await wrapper.find('#original-tab').trigger('keydown', { key: 'Home' })
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('쉬운 말로 읽기')

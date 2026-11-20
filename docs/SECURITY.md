@@ -9,7 +9,7 @@
 | XML entity 폭탄·XXE | `defusedxml`로 DOCX/HWPX XML을 읽고 DTD/entity 선언을 거부한다. 잘못된 문서는 400이다. | 라이브러리 취약점은 업데이트와 함께 재검토해야 한다. |
 | XSS·클릭재킹 | CSP(`default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, Referrer-Policy를 응답에 붙인다. Pretendard 글꼴 CDN을 style/font/connect 출처에 허용한다. Vue의 진행 막대가 동적 인라인 스타일을 쓰므로 `style-src 'unsafe-inline'`도 허용하고 스크립트는 same-origin 정책을 유지한다. Vue 텍스트 보간을 사용하고, 예외적인 `v-html`은 HTML 이스케이프 뒤 고정 `<b>` 서식만 만든다. | 스타일 인라인은 허용하지만 인라인 스크립트는 허용하지 않는다. CSP는 같은 출처에 배포된 악성 스크립트나 브라우저 취약점을 막지 못한다. |
 | 교사 프롬프트 인젝션 | 프롬프트 판 `v3-injection-guard`는 원문을 `<원문>` 경계로 감싸고 그 안의 지시는 따르지 말라고 명시한다. 교사 짝 검사는 숫자·보존 용어·조건·영어·길이·줄 수를 확인한다. | 프롬프트 지시만으로 인젝션을 완전히 막을 수 없다. 사람 검토와 고정 평가셋, BERTScore·게이트가 의미 훼손을 추가로 살펴야 한다. |
-| 피드백 데이터 오염 | 자동 파이프라인의 어느 단계도 `feedback.jsonl`이나 `feedback_approved.jsonl`을 읽지 않는다. 사람과 총괄이 승인한 항목은 별도 수동 선별 과정에서만 `data/feedback_approved.jsonl`로 옮긴다. | 수동 반영 단계가 추가되면 그 importer의 승인 절차와 변경 이력을 따로 검토해야 한다. |
+| 피드백 데이터 오염 | `feedback.jsonl`은 기본 자동 학습 입력이 아니다. 각 항목은 `request_id`, `result_id`, `sentence_index` 키를 가지며, 같은 키의 마지막 기록만 유효하다. `python scripts/review_feedback.py logs/feedback.jsonl`로 최신 투표를 확인한다. 자동 파이프라인은 피드백 파일을 읽지 않는다. 승인 항목은 사람과 총괄이 수동 선별해 별도 학습 입력으로 옮긴다. | 수동 선별에서 검토를 누락하거나 잘못 승인할 수 있다. |
 | 로그 디스크 고갈·민감정보 | 요청·피드백 로그 각각 현재 파일 10 MiB와 최대 3개 회전본으로 제한한다. 여유 공간이 50 MiB 미만이거나 기록이 실패하면 경고 후 기록을 멈추며, 피드백 요청에는 503을 반환한다. 알려진 이메일·전화번호·주민번호 형식은 저장 전에 가린다. | 로그는 회전 시 오래된 기록이 삭제된다. 패턴에 잡히지 않는 개인정보·문서 내용은 남을 수 있으므로 로그 볼륨 접근을 제한하고 보존 기간을 정해야 한다. |
 | 데이터베이스 질의 조작(SQL injection) | 현재 DB와 SQL 질의가 없다. 파일은 JSONL로 추가 기록한다. | 향후 DB를 추가하면 파라미터화 질의와 권한 분리를 적용해야 한다. |
 

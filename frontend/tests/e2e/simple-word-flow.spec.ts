@@ -42,6 +42,9 @@ test('uploads a public document, sends sentence feedback, and restores the resul
   const simplifyResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/simplify' && response.request().method() === 'POST')
   await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
   const actual = await (await simplifyResponse).json()
+  expect(actual.request_id).toEqual(expect.any(String))
+  expect(actual.term_licenses).toHaveProperty('국립국어원_15130006')
+  expect(actual.term_licenses).toHaveProperty('법제처_법령정보지식베이스')
   expect(actual.sentences.map((sentence: { original: string }) => sentence.original)).toEqual([firstSentence, '수수료는 400원입니다.'])
   expect(actual.sentences.map((sentence: { paragraph_id: number }) => sentence.paragraph_id)).toEqual([0, 1])
   expect(actual.sentences[0]).toEqual(expect.objectContaining({ simple: expect.any(String), fallback: expect.any(Boolean) }))
@@ -54,7 +57,8 @@ test('uploads a public document, sends sentence feedback, and restores the resul
   const longSentence = page.locator('.document-sentence').first()
   expect(await longSentence.evaluate((element) => element.tagName)).toBe('SPAN')
   expect(await longSentence.evaluate((element) => element.getClientRects().length)).toBeGreaterThan(1)
-  expect(await longSentence.getAttribute('role')).toBeNull()
+  expect(await longSentence.getAttribute('role')).toBe('button')
+  expect(await longSentence.getAttribute('aria-pressed')).toBe('false')
   await page.getByRole('tab', { name: '문장별 보기' }).click()
   const expectedChanged = actual.sentences.filter((sentence: { original: string; simple: string; fallback: boolean }) => (sentence.fallback ? sentence.original : sentence.simple) !== sentence.original).length
   await expect(page.locator('#sentences-panel .comparison-summary')).toContainText(`${expectedChanged} / ${actual.sentences.length}개 문장에서 말이 바뀌었어요`)
@@ -65,9 +69,18 @@ test('uploads a public document, sends sentence feedback, and restores the resul
   await expect(page.locator('.clause-note')).toContainText(actual.sentences[0].original)
   await expect(page.locator('.clause-note')).toContainText(actual.sentences[0].fallback ? actual.sentences[0].original : actual.sentences[0].simple)
   await expect(page.locator('.clause-note')).toContainText('국립국어원 공공언어 평가용 용어 목록 · 공공누리 제1유형')
+  const resultId = await page.evaluate(() => JSON.parse(localStorage.getItem('simple-word.recent-results') ?? '[]')[0].id)
+  let feedbackPosts = 0
+  page.on('request', (request) => { if (new URL(request.url()).pathname === '/feedback' && request.method() === 'POST') feedbackPosts++ })
   const feedbackResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/feedback' && response.request().method() === 'POST')
   await page.getByRole('button', { name: /좋아요/ }).first().click()
-  expect((await feedbackResponse).status()).toBe(200)
+  const savedFeedback = await feedbackResponse
+  expect(savedFeedback.status()).toBe(200)
+  expect(savedFeedback.request().postDataJSON()).toEqual(expect.objectContaining({
+    request_id: actual.request_id, result_id: resultId, sentence_index: 0,
+  }))
+  await page.getByRole('button', { name: /좋아요/ }).first().click()
+  await expect.poll(() => feedbackPosts).toBe(1)
   await expect(page.getByText('의견이 저장됐어요.')).toBeVisible()
   const changedVote = page.waitForResponse((response) => new URL(response.url()).pathname === '/feedback' && response.request().method() === 'POST')
   await page.getByRole('button', { name: /아쉬워요/ }).first().click()

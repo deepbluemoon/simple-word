@@ -36,8 +36,13 @@ def test_simplify_txt_returns_original_and_simple_sentences():
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert payload["request_id"]
+    assert payload["term_licenses"] == api_main.difficult_term_licenses()
+    assert payload == {
+        "request_id": payload["request_id"],
         "model_version": "dummy",
+        "term_licenses": api_main.difficult_term_licenses(),
         "sentences": [
             {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False, "fallback_reason": None, "paragraph_id": 0, "title": False, "terms": []},
             {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False, "fallback_reason": None, "paragraph_id": 0, "title": False, "terms": []},
@@ -318,15 +323,19 @@ def test_feedback_appends_jsonl(tmp_path, monkeypatch):
     monkeypatch.setattr("api.main.LOG_DIR", tmp_path)
 
     response = client.post("/feedback", json={
+        "request_id": "req-1", "result_id": "result-1", "sentence_index": 0,
         "model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up",
     })
 
     assert response.status_code == 200
-    assert (tmp_path / "feedback.jsonl").read_text(encoding="utf-8") == '{"model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up"}\n'
+    record = json.loads((tmp_path / "feedback.jsonl").read_text(encoding="utf-8"))
+    assert record == {"request_id": "req-1", "result_id": "result-1", "sentence_index": 0,
+                      "model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up"}
 
 
 def test_feedback_redacts_known_pii_before_logging(tmp_path):
     response = client.post("/feedback", json={
+        "request_id": "req-1", "result_id": "result-1", "sentence_index": 2,
         "model_version": "v1", "original": "010-1234-5678로 문의", "simple": "010-1234-5678로 연락", "vote": "up",
     })
 
@@ -357,6 +366,7 @@ def test_feedback_stops_writing_when_disk_is_low(tmp_path, monkeypatch, caplog):
 
     with caplog.at_level(logging.WARNING):
         response = client.post("/feedback", json={
+            "request_id": "req-1", "result_id": "result-1", "sentence_index": 0,
             "model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up",
         })
 
@@ -367,9 +377,18 @@ def test_feedback_stops_writing_when_disk_is_low(tmp_path, monkeypatch, caplog):
 
 def test_feedback_rejects_strings_over_2000_characters():
     response = client.post("/feedback", json={
+        "request_id": "req-1", "result_id": "result-1", "sentence_index": 0,
         "model_version": "v1", "original": "x" * 2001, "simple": "쉬운 말", "vote": "up",
     })
 
+    assert response.status_code == 422
+
+
+def test_feedback_requires_request_result_and_sentence_identity():
+    response = client.post("/feedback", json={
+        "model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up",
+        "request_id": "req-1", "result_id": "result-1", "sentence_index": -1,
+    })
     assert response.status_code == 422
 
 
@@ -426,11 +445,15 @@ def test_simplify_response_has_fallback_per_sentence_and_feedback_accepts_it(mon
             return "v-guard", "champion", GuardedModel(), None, None
 
     monkeypatch.setattr(api_main, "router", OneRouter())
-    sentences = client.post("/simplify", files={"file": ("a.txt", "20일 이내 신청.\n센터에서 받는다.")}).json()["sentences"]
+    payload = client.post("/simplify", files={"file": ("a.txt", "20일 이내 신청.\n센터에서 받는다.")}).json()
+    sentences = payload["sentences"]
     record = json.loads((tmp_path / "requests.jsonl").read_text().splitlines()[0])
 
     assert [s["fallback"] for s in sentences] == [True, False] == [s["fallback"] for s in record["sentences"]]
-    response = client.post("/feedback", json={"model_version": "v-guard", **sentences[0], "vote": "down"})  # 웹이 문장을 통째로 보내도
+    response = client.post("/feedback", json={
+        "request_id": payload["request_id"], "result_id": "result-guard", "sentence_index": 0,
+        "model_version": "v-guard", **sentences[0], "vote": "down",
+    })  # 웹이 문장을 통째로 보내도
     assert response.status_code == 200
 
 

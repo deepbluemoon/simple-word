@@ -1,6 +1,6 @@
 import re
 
-from simple_word.terms import found
+from simple_word.terms import difficult_term_licenses, difficult_terms, found, terms_in
 from training.terms import LAW_SOURCE, coverage, merge_dicts, parse_law_cache, parse_law_xml, parse_nikl
 
 
@@ -11,6 +11,46 @@ def test_found_matches_original_regex_results():
         pattern = re.compile(r"(?<![가-힣A-Za-z])" + re.escape(term))
         for text in texts:
             assert found(term, text) == (pattern.search(text) is not None)
+
+
+def test_runtime_terms_include_easy_meaning_source_and_utf16_offsets(tmp_path):
+    path = tmp_path / "terms.json"
+    path.write_text('{"licenses":{"국립국어원":"공공누리 1유형"},"terms":{"익일":{"alternatives":["다음 날"],"sources":["국립국어원"]}}}', encoding="utf-8")
+    difficult_terms.cache_clear()
+    difficult_term_licenses.cache_clear()
+    try:
+        assert terms_in("😀 익일에 신청", difficult_terms(path)) == [{
+            "text": "익일", "start": 3, "end": 5, "easy": ["다음 날"], "source": "국립국어원",
+        }]
+        assert difficult_term_licenses(path) == {"국립국어원": "공공누리 1유형"}
+    finally:
+        difficult_terms.cache_clear()
+        difficult_term_licenses.cache_clear()
+
+
+def test_terms_in_uses_boundaries_longest_overlap_and_uppercase_short_abbreviations():
+    entry = {"alternatives": ["쉬운 말"], "sources": ["출처"]}
+    dictionary = {term: entry for term in (
+        "스마트 그리드", "그리드", "트램", "스톡", "CSV", "CS", "AI",
+    )}
+    found_terms = terms_in("스마트 그리드와 그리드, 트램펄린·트램은, 스톡홀름, CSV 파일 csv 파일, CS 고객", dictionary)
+    assert [(term["text"], term["start"]) for term in found_terms] == [
+        ("스마트 그리드", 0), ("그리드", 9), ("트램", 19), ("CSV", 30), ("CS", 45),
+    ]
+
+
+def test_terms_in_rejects_english_substrings_and_korean_compounds():
+    entry = {"alternatives": ["뜻"], "sources": ["출처"]}
+    dictionary = {term: entry for term in ("트램", "스톡", "CSV", "AI")}
+    text = "트램펄린 스톡홀름 xCSV CSV2 csv CSV 파일 AI AI가"
+    hits = terms_in(text, dictionary)
+    assert [(item["text"], text[item["start"]:item["end"]]) for item in hits] == [("CSV", "CSV"), ("AI", "AI")]
+
+
+def test_bundled_runtime_dictionary_finds_nikl_entry():
+    hit = next(term for term in terms_in("거버넌스 개선") if term["text"] == "거버넌스")
+    assert hit["easy"] == ["정책", "관리", "민관 협력", "협치", "행정"]
+    assert hit["source"] == "국립국어원_15130006"
 
 
 def test_nikl_normalizes_aliases_and_filters_generic_short_terms():

@@ -3,17 +3,17 @@ import { computed, ref } from 'vue'
 import { sendFeedback } from '@/api/simpleWord'
 import { getFeedbackVote, saveFeedbackVote } from '@/stores/feedbackVotes'
 
-const props = defineProps<{ resultId: string; sentenceIndex: number; modelVersion: string; original: string; simple: string }>()
+const props = defineProps<{ requestId: string; resultId: string; sentenceIndex: number; modelVersion: string; original: string; simple: string }>()
 const vote = computed(() => getFeedbackVote(props.resultId, props.sentenceIndex))
 const busy = ref(false)
 const error = ref('')
 const confirmation = ref('')
 async function send(value: 'up' | 'down') {
-  if (busy.value) return
+  if (busy.value || vote.value === value) return
   const previous = vote.value
   busy.value = true; error.value = ''; confirmation.value = ''
   try {
-    await sendFeedback(props.modelVersion, props.original, props.simple, value)
+    await sendFeedback(props.requestId, props.resultId, props.sentenceIndex, props.modelVersion, props.original, props.simple, value)
     saveFeedbackVote(props.resultId, props.sentenceIndex, value)
     confirmation.value = previous && previous !== value ? '의견을 변경했어요.' : '의견이 저장됐어요.'
   }
