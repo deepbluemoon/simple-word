@@ -8,7 +8,7 @@ python -m training.train --version v2 ... --eval-set data/eval/eval_set.jsonl --
 후보는 pairs.jsonl 문장 중 data/<v>/{train,valid,test}.jsonl·고정 parity 입력과 같거나
 유사 중복(한글만 남겨 같음)인 문장을 뺀 것에서, 층(stratum)별 정해진 수만큼 seed 0으로 뽑는다.
 """
-import argparse, csv, json, random
+import argparse, csv, json, random, re
 from collections import Counter
 from pathlib import Path
 
@@ -158,6 +158,74 @@ def import_csv(a):
     print(f"{len(out)}건(고침 {edited}, 제외 {skipped}) → {a.out}")
 
 
+V2_FILL_OK = re.compile(r"(다|요|니다|음|함)[.”\"']?$")
+
+
+def fill_v2(a):
+    """v1에서 뺀 자리(표 조각 등)를 같은 층의 새 문장으로 채운다. 학습에 쓴 분할(--splits 여러 개)·기존 후보와 유사 중복이 아니고,
+    25자 이상이면서 문장으로 끝나는(부처명 조각 아님) 문장만. 층별 seed 0으로 섞어 앞에서 뽑아 빈 id에 차례로 배정한다."""
+    nikl, keep = nikl_dict(a.data_dir), preserve_terms()
+    rows = pool(a.pairs, a.splits[0], nikl, keep)
+    used = set().union(*(used_texts(d)[0] for d in a.splits[1:])) if len(a.splits) > 1 else set()
+    seen = {_near(json.loads(l)["src"]) for l in Path(a.candidates).open(encoding="utf-8")}
+    rows = [r for r in rows if _near(r["src"]) not in used and _near(r["src"]) not in seen]
+    rows = [r for r in rows if len(r["src"]) >= 25 and V2_FILL_OK.search(r["src"].strip()) and not re.search(r"(부|청|처|위)$", r["src"].strip())]
+    have = {json.loads(l)["id"] for l in Path(a.v1).open(encoding="utf-8")}
+    cand = [json.loads(l) for l in Path(a.candidates).open(encoding="utf-8")]
+    slots = {}
+    for c in cand:
+        if c["id"] not in have:
+            slots.setdefault(c["stratum"], []).append(c["id"])
+    random.seed(SEED)
+    out = []
+    for stratum in ("general", "numbers", "preserve", "difficult", "long"):
+        need = slots.get(stratum, [])
+        if not need:
+            continue
+        xs = [r for r in rows if r["stratum"] == stratum]
+        random.shuffle(xs)
+        for slot, r in zip(need, xs):
+            out.append({"id": slot, "doc_id": r["doc_id"], "idx": r["idx"], "stratum": stratum, "src": r["src"], "teacher": r.get("tgt")})
+    Path(a.out).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in out), encoding="utf-8")
+    print(f"{len(out)}건 → {a.out}")
+
+
+V2_MEMO = "[Claude 검수 v2: 적극적 쉬운 말, 정답 2개]"
+V2_REF_COLS = ("정답1", "정답2", "정답3")
+
+
+def build_v2(a):
+    """평가셋 v2(docs/EVAL_SET.md): v1 평가셋 + v1에서 뺀 자리를 채운 문장(fill) + 정답 CSV(id, 원문, 정답1~3, 메모)
+    → references(정답 2~3개) 형식. 정답이 원문과 같거나 정답끼리 같으면 멈춘다. 같은 입력이면 같은 바이트를 쓴다."""
+    read = lambda path: [json.loads(l) for l in Path(path).open(encoding="utf-8") if l.strip()]
+    old = {r["id"]: r for r in read(a.v1)}
+    cand = {r["id"]: r for r in read(a.candidates)}
+    fill = {r["id"]: r for r in read(a.fill)}
+    rows = []
+    with Path(a.csv).open(encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            k = row["id"].strip()
+            refs = [row[c].strip() for c in V2_REF_COLS if (row.get(c) or "").strip()]
+            src = old[k]["src"] if k in old else fill[k]["src"]
+            if row["원문"].strip() != src:
+                raise SystemExit(f"{k}: 원문이 평가셋/채움 문장과 다릅니다")
+            if len(refs) < 2 or len(set(refs)) != len(refs) or src in refs:
+                raise SystemExit(f"{k}: 정답은 원문과 다른, 서로 다른 2개 이상이어야 합니다")
+            if k in old:
+                o = old[k]
+                r = {"id": k, "src": src, "references": refs, "stratum": o["stratum"], "doc_id": o["doc_id"],
+                     "teacher": cand[k].get("teacher") or "", "ref_v1": o["ref"]}
+            else:
+                f = fill[k]
+                r = {"id": k, "src": src, "references": refs, "stratum": f["stratum"], "doc_id": f["doc_id"], "idx": f["idx"],
+                     "teacher": f.get("teacher") or "", "replaced": cand[k]["src"]}
+            r["memo"] = (row.get("메모") or "").strip() or V2_MEMO
+            rows.append(r)
+    rows.sort(key=lambda r: r["id"])
+    Path(a.out).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    print(f"{len(rows)}건 → {a.out}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -174,8 +242,21 @@ def main():
     i.add_argument("--candidates", default="data/eval/candidates.jsonl")
     i.add_argument("--csv", default="data/eval/review.csv")
     i.add_argument("--out", default="data/eval/eval_set.jsonl")
+    f = sub.add_parser("fill-v2", help="v1에서 뺀 자리를 같은 층의 새 문장으로 채우기")
+    f.add_argument("--pairs", default="data/pairs.jsonl")
+    f.add_argument("--splits", nargs="+", default=["data/v2", "data/v3-base"], help="학습에 쓴 분할 폴더들(첫째는 후보 풀 기준)")
+    f.add_argument("--candidates", default="data/eval/candidates.jsonl")
+    f.add_argument("--v1", default="data/eval/eval_set.v1.jsonl")
+    f.add_argument("--data-dir", default="data")
+    f.add_argument("--out", default="data/eval/fill_v2.jsonl")
+    b = sub.add_parser("build-v2", help="평가셋 v2(references 정답 2~3개) 만들기")
+    b.add_argument("--v1", default="data/eval/eval_set.v1.jsonl")
+    b.add_argument("--candidates", default="data/eval/candidates.jsonl")
+    b.add_argument("--fill", default="data/eval/fill_v2.jsonl", help="v1에서 뺀 자리를 채운 문장(id, doc_id, idx, stratum, src, teacher)")
+    b.add_argument("--csv", default="data/eval/review_v2.csv")
+    b.add_argument("--out", default="data/eval/eval_set.jsonl")
     a = ap.parse_args()
-    {"candidates": candidates, "export-csv": export_csv, "import-csv": import_csv}[a.cmd](a)
+    {"candidates": candidates, "export-csv": export_csv, "import-csv": import_csv, "fill-v2": fill_v2, "build-v2": build_v2}[a.cmd](a)
 
 
 if __name__ == "__main__":

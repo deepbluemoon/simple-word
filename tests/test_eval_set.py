@@ -48,3 +48,33 @@ def test_csv_round_trip(tmp_path):
     csv.writer(v.open("w", encoding="utf-8-sig", newline="")).writerows(rows)
     with pytest.raises(SystemExit, match="원문"):
         import_csv(SimpleNamespace(candidates=c, csv=v, out=o))
+
+
+def test_build_v2_references_and_rejects_copies(tmp_path):
+    import csv as _csv, json as _json, types
+    import pytest
+    from training.eval_set import build_v2
+    v1 = tmp_path / "v1.jsonl"
+    v1.write_text(_json.dumps({"id": "e001", "src": "원문 하나", "ref": "옛 정답", "stratum": "general", "doc_id": "d1"}, ensure_ascii=False) + "\n", encoding="utf-8")
+    cand = tmp_path / "cand.jsonl"
+    cand.write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in [
+        {"id": "e001", "src": "원문 하나", "teacher": "교사1"}, {"id": "e002", "src": "표 조각", "teacher": "교사2"}]), encoding="utf-8")
+    fill = tmp_path / "fill.jsonl"
+    fill.write_text(_json.dumps({"id": "e002", "doc_id": "d2", "idx": 3, "stratum": "general", "src": "새 원문", "teacher": "교사3"}, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def write(rows):
+        p = tmp_path / "review.csv"
+        with p.open("w", encoding="utf-8-sig", newline="") as fh:
+            w = _csv.writer(fh)
+            w.writerow(["id", "원문", "정답1", "정답2", "메모"])
+            w.writerows(rows)
+        return p
+    out = tmp_path / "out.jsonl"
+    a = types.SimpleNamespace(v1=v1, candidates=cand, fill=fill, csv=write([["e002", "새 원문", "가", "나", ""], ["e001", "원문 하나", "다", "라", ""]]), out=out)
+    build_v2(a)
+    got = [_json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+    assert [g["id"] for g in got] == ["e001", "e002"] and got[0]["references"] == ["다", "라"] and got[0]["ref_v1"] == "옛 정답"
+    assert got[1]["replaced"] == "표 조각" and got[1]["idx"] == 3 and got[1]["teacher"] == "교사3"
+    a.csv = write([["e001", "원문 하나", "원문 하나", "라", ""]])
+    with pytest.raises(SystemExit):
+        build_v2(a)

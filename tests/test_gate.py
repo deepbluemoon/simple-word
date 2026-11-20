@@ -179,3 +179,34 @@ def test_gate_rejects_different_eval_set_fingerprints(tmp_path, monkeypatch):
     result = gate(tmp_path, monkeypatch, "champion", "candidate", models_dir, reports_dir, reevaluate)
     assert not result["passed"]
     assert any("fingerprint differs" in reason for reason in result["reasons"])
+
+
+def test_gate_runs_keep_separate_evaluation_dirs(tmp_path, monkeypatch):
+    import training.evaluate as ev
+    from gate import gate as G
+    data = tmp_path / "data"
+    (data / "eval").mkdir(parents=True)
+    (data / "eval" / "eval_set.jsonl").write_text(json.dumps({"src": "원문", "ref": "정답"}, ensure_ascii=False) + "\n")
+    sha = hashlib.sha1((data / "eval" / "eval_set.jsonl").read_bytes()).hexdigest()
+    outs = []
+
+    def fake_eval(version, path, model_root, data_dir, with_bert, out):
+        outs.append(out)
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_text("{}")
+        return {**metrics(), "test_set_sha1": sha}
+    monkeypatch.setattr(ev, "evaluate", fake_eval)
+    monkeypatch.setattr(G, "check_parity", lambda *a: [])
+    times = iter(["20261120T010000Z", "20261120T010100Z"])
+
+    class FakeDT:
+        @staticmethod
+        def now(tz=None):
+            import types
+            return types.SimpleNamespace(strftime=lambda fmt: next(times), isoformat=lambda: "2026-11-20T01:00:00+00:00")
+    monkeypatch.setattr(G, "datetime", FakeDT)
+    r1 = G.run_gate("dummy", "v2", tmp_path / "models", tmp_path / "reports", data_dir=data)
+    r2 = G.run_gate("v2", "v3", tmp_path / "models", tmp_path / "reports", data_dir=data)
+    assert r1["evaluations"] == "evaluations/20261120T010000Z-dummy-vs-v2"
+    assert r2["evaluations"] == "evaluations/20261120T010100Z-v2-vs-v3"
+    assert len({Path(o).parent for o in outs}) == 2 and len(outs) == 3

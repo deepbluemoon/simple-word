@@ -14,8 +14,8 @@ Evaluation set SHA-1: `8922190fee493df3f292f4a49294dd7e97a25dd6`
 | sentence_length_reduction_rate | -0.0809 | -0.0421 |
 | difficult_term_retention_rate | 0.6 | 0.5 |
 | sari | 0.4794 | 0.487 |
-| cpu_p95_ms_per_sentence | 211.8 | 290.5 |
-| model_memory_mb | 287.1 | 269.2 |
+| cpu_p95_ms_per_sentence | 91.7 | 82.6 |
+| model_memory_mb | 269.9 | 267.6 |
 
 **결과: PASS**
 
@@ -23,5 +23,5 @@ Evaluation set SHA-1: `8922190fee493df3f292f4a49294dd7e97a25dd6`
 
 | 시각 | Champion | 후보 | 결과 |
 |---|---|---|---|
-| 2026-11-20T04:02:07.832153+00:00 | dummy | v2 | PASS |
-| 2026-11-20T04:03:48.603032+00:00 | v2 | v3-base | PASS |
+| 2026-11-20T04:20:44.248589+00:00 | dummy | v2 | PASS |
+| 2026-11-20T04:21:25.124180+00:00 | v2 | v3-base | PASS |

@@ -16,17 +16,28 @@ def _ngrams(tokens, n):
 
 
 def references(row):
-    """평가 행의 정답 목록. 새 형식은 references 리스트, 예전 형식은 tgt 또는 ref 한 개."""
-    if row.get("references"):
-        return list(row["references"])
-    return [row["tgt"] if "tgt" in row else row["ref"]]
+    """평가 행의 정답 목록. 새 형식은 references(문자열 리스트, 1개 이상), 예전 형식은 tgt 또는 ref 문자열 한 개."""
+    where = row.get("id", row.get("src", "")[:30])
+    if "references" in row:
+        refs = row["references"]
+        if not isinstance(refs, list):
+            raise TypeError(f"{where}: references는 문자열 리스트여야 한다 ({type(refs).__name__})")
+        if not refs:
+            raise ValueError(f"{where}: references가 비었다")
+        if not all(isinstance(r, str) and r.strip() for r in refs):
+            raise ValueError(f"{where}: references에 빈 값이나 문자열이 아닌 값이 있다")
+        return list(refs)
+    for key in ("tgt", "ref"):
+        if key in row:
+            if not isinstance(row[key], str) or not row[key].strip():
+                raise ValueError(f"{where}: {key}가 비었거나 문자열이 아니다")
+            return [row[key]]
+    raise ValueError(f"{where}: 정답이 없다(references, tgt, ref 중 하나 필요)")
 
 
 def _sari_ngram(s, c, rs):
     """Xu et al. 2016 SARI 한 n-gram 차수. keep F1, delete 정밀도, add F1.
-    rs는 참조들의 n-gram 목록 리스트(문자열 하나면 참조 1개). 원 구현처럼 원문·출력 개수를 참조 수만큼 곱해 비교한다."""
-    if not rs or isinstance(rs[0], str):
-        rs = [rs]
+    rs는 참조마다의 n-gram 목록을 담은 리스트(참조 1개면 [ngrams]). 원 구현처럼 원문·출력 개수를 참조 수만큼 곱해 비교한다."""
     k = len(rs)
     rc = sum((collections.Counter(r) for r in rs), collections.Counter())
     sc = collections.Counter({g: n * k for g, n in collections.Counter(s).items()})
@@ -103,6 +114,8 @@ def bert_score_groups(groups):
     cands, refs, owners, spans = [], [], [], {}
     sentence = 0
     for name, (candidates, targets) in groups.items():
+        if len(candidates) != len(targets):
+            raise ValueError(f"bert_score_groups[{name}]: 후보 {len(candidates)}개와 정답 {len(targets)}개의 수가 다르다")
         if candidates:
             first = sentence
             for cand, target in zip(candidates, targets):
@@ -117,6 +130,33 @@ def bert_score_groups(groups):
     for owner, value in zip(owners, values):
         best[owner] = max(best.get(owner, value), value)
     return {name: round(statistics.mean(best[i] for i in range(start, end)), 4) for name, (start, end) in spans.items()}
+
+
+def _display_path(path, data_dir):
+    """보고서에 남길 경로. 절대 경로(사용자 이름 등)를 남기지 않도록 data 폴더 기준 상대 경로로 쓴다."""
+    path, data_dir = Path(path), Path(data_dir)
+    try:
+        return str(Path(data_dir.name) / path.resolve().relative_to(data_dir.resolve()))
+    except ValueError:
+        return str(path) if not path.is_absolute() else path.name
+
+
+def reference_diagnostics(rows, test_path, eval_set_sha1, with_bert=True):
+    """원문 그대로·교사 출력의 SARI·BERTScore(정답 대비). 평가셋에만 달려 있으므로 평가셋 SHA-1별로
+    <평가셋>.diagnostics-<sha1 앞 12자>.json에 캐시해 게이트마다 다시 계산하지 않는다."""
+    cache = Path(test_path).with_name(f"{Path(test_path).name}.diagnostics-{eval_set_sha1[:12]}.json")
+    if cache.is_file():
+        cached = json.loads(cache.read_text(encoding="utf-8"))
+        if cached.get("test_set_sha1") == eval_set_sha1 and (cached.get("with_bert") or not with_bert):
+            return cached["diagnostics"]
+    diagnostics, groups = _reference_diagnostics(rows, test_path)
+    if with_bert:
+        scores = bert_score_groups(groups)
+        for name, value in scores.items():
+            diagnostics[name]["bert_score_ref"] = value
+    cache.write_text(json.dumps({"test_set_sha1": eval_set_sha1, "with_bert": with_bert, "diagnostics": diagnostics},
+                                ensure_ascii=False, indent=1), encoding="utf-8")
+    return diagnostics
 
 
 def _reference_diagnostics(rows, test_path):
@@ -183,6 +223,9 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     if not rows:
         raise ValueError(f"{test_path}: evaluation set is empty")
     srcs, refs = [r["src"] for r in rows], [references(r) for r in rows]
+    diagnostics = None
+    if all("ref" in row or "references" in row for row in rows):  # 지연 측정 전에 끝낸다(캐시 없을 때 BERTScore가 돈다)
+        diagnostics = reference_diagnostics(rows, test_path, eval_set_sha1, with_bert)
     simp, outs, ms = Simplifier(str(model_dir)), [], []
     if simp.dummy or not all(_is_int8(model_dir / f) for f in ("encoder.onnx", "decoder.onnx")):
         raise ValueError(f"{model_dir}: INT8 ONNX 모델이 아니다. 게이트 지표는 서빙과 같은 INT8 ONNX로만 계산한다")
@@ -194,19 +237,10 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
         outs.append(o)
         fallbacks.append(fb)
     m = text_metrics(srcs, outs, refs, preserve_terms(), nikl_dict(data_dir))
-    bert_groups = {"output_ref": (outs, refs), "output_source": (outs, srcs)}
-    diagnostics = None
-    if all("ref" in row or "references" in row for row in rows):
-        diagnostics, reference_groups = _reference_diagnostics(rows, test_path)
-        bert_groups.update({f"diagnostics_{name}": pair for name, pair in reference_groups.items()})
     if with_bert:
-        bert_scores = bert_score_groups(bert_groups)
+        bert_scores = bert_score_groups({"output_ref": (outs, refs), "output_source": (outs, srcs)})
         m["bert_score_ref"] = bert_scores["output_ref"]
         m["bert_score_source"] = bert_scores["output_source"]
-        if diagnostics is not None:
-            diagnostics["source_copy"]["bert_score_ref"] = bert_scores["diagnostics_source_copy"]
-            if "diagnostics_teacher" in bert_scores:
-                diagnostics["teacher"]["bert_score_ref"] = bert_scores["diagnostics_teacher"]
     m["fallback_rate"] = round(sum(fallbacks) / len(fallbacks), 4)  # 숫자 안전장치로 원문을 돌려준 비율
     m["cpu_p95_ms_per_sentence"] = round(statistics.quantiles(ms, n=20)[18], 1)
     m["model_memory_mb"] = model_memory_mb(model_dir, srcs[:20])
@@ -219,7 +253,7 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     if out:
         out = Path(out)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps({"version": version, "test": str(test_path), "metrics": m}, ensure_ascii=False, indent=1), encoding="utf-8")
+        out.write_text(json.dumps({"version": version, "test": _display_path(test_path, data_dir), "metrics": m}, ensure_ascii=False, indent=1), encoding="utf-8")
         out.with_suffix(".outputs.jsonl").write_text(lines, encoding="utf-8")
         return m
     meta_path = model_dir / "metadata.json"

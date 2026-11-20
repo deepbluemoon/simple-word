@@ -1,6 +1,6 @@
 {
  "version": "v3-ph",
- "test": "/Users/pioneer13/simple-word/data/eval/eval_set.jsonl",
+ "test": "data/eval/eval_set.jsonl",
  "metrics": {
   "number_date_amount_match_rate": 1.0,
   "preserved_terms_retention_rate": 1.0,
@@ -19,8 +19,8 @@
   "bert_score_ref": 0.8357,
   "bert_score_source": 0.8085,
   "fallback_rate": 0.135,
-  "cpu_p95_ms_per_sentence": 114.9,
-  "model_memory_mb": 269.8,
+  "cpu_p95_ms_per_sentence": 82.6,
+  "model_memory_mb": 267.3,
   "eval_model": "onnx_int8_cpu",
   "test_set_sha1": "8922190fee493df3f292f4a49294dd7e97a25dd6",
   "diagnostics": {
