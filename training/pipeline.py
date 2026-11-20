@@ -1,5 +1,7 @@
 """자동 학습 파이프라인 (이슈 #8): 수집 → 전처리 → 교사 생성 → 검사 → (새 통과 짝이 충분하면) 학습 → export → evaluate → 게이트 → 후보 등록.
 
+feedback.jsonl은 자동 입력으로 쓰지 않는다. 사람과 총괄이 검토·승인한 뒤에만 별도 선별 절차로 학습 데이터에 반영한다.
+
     python -m training.pipeline --data-only     # 매일: 수집~검사까지만
     python -m training.pipeline                 # 주 1회: 통과 짝이 직전 학습보다 --min-new-pairs 건 이상 늘었으면 학습까지
     python -m training.pipeline --force         # 건수와 상관없이 학습
@@ -112,6 +114,13 @@ def _collect(ctx):
     return {"added": collect(ctx.data_dir, ctx.raw_dir, log=ctx.log)}
 
 
+def _feedback_review_guard(ctx):
+    feedback = ctx.data_dir / "feedback.jsonl"
+    if feedback.exists() and feedback.stat().st_size:
+        raise ValueError("feedback.jsonl requires human and project-lead review before data import")
+    return {"feedback_imported": False}
+
+
 def _preprocess(ctx):
     from training.preprocess import preprocess
     stats = preprocess(ctx.data_dir)
@@ -132,6 +141,7 @@ def _check(ctx):
 def data_stages() -> list[Stage]:
     f = lambda name: lambda ctx: sha1(ctx.data_dir / name)
     return [
+        Stage("feedback_review_guard", _feedback_review_guard),
         # 수집은 하루 한 번. 입력 = 날짜
         _fingerprint_stage("collect", lambda ctx: {"date": ctx.today}, _collect),
         _fingerprint_stage("preprocess", lambda ctx: {"docs": f("docs.jsonl")(ctx)}, _preprocess),

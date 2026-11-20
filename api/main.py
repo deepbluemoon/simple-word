@@ -1,15 +1,20 @@
 import io
 import json
+import logging
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
 import zipfile
+import fcntl
+import multiprocessing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
-from xml.etree import ElementTree
+from defusedxml import ElementTree
+from defusedxml.common import DefusedXmlException
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -24,6 +29,11 @@ router = ModelRouter(os.getenv("REGISTRY_PATH", "models/registry.json"))
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_UNPACKED_BYTES = 20 * 1024 * 1024
 MAX_PDF_PAGES = 50
+PDF_PARSE_TIMEOUT_SECONDS = 10
+MAX_LOG_BYTES = 10 * 1024 * 1024
+MAX_LOG_BACKUPS = 3
+MIN_LOG_FREE_BYTES = 50 * 1024 * 1024
+logger = logging.getLogger(__name__)
 # shortcut: tune after measuring Lightsail p95 (#6).
 MAX_SENTENCES = int(os.getenv("MAX_SENTENCES", "100"))
 SIMPLIFY_SLOTS = threading.BoundedSemaphore(int(os.getenv("MAX_CONCURRENT_SIMPLIFY", "2")))
@@ -59,6 +69,44 @@ def xml_paragraph_text(data: bytes) -> str:
     return "\n\n".join(paragraphs)
 
 
+def _extract_pdf_worker(data: bytes, connection) -> None:
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(data))
+        if len(reader.pages) > MAX_PDF_PAGES:
+            connection.send((False, "page_limit"))
+            return
+        connection.send((True, "\n".join(page.extract_text() or "" for page in reader.pages)))
+    except BaseException as exc:
+        connection.send((False, type(exc).__name__))
+    finally:
+        connection.close()
+
+
+def extract_pdf_text(data: bytes) -> str:
+    context = multiprocessing.get_context("spawn")
+    receive, send = context.Pipe(duplex=False)
+    process = context.Process(target=_extract_pdf_worker, args=(data, send))
+    process.start()
+    send.close()
+    try:
+        if not receive.poll(PDF_PARSE_TIMEOUT_SECONDS):
+            raise TimeoutError("PDF parsing timed out")
+        ok, result = receive.recv()
+        if not ok:
+            if result == "page_limit":
+                raise HTTPException(status_code=400, detail="PDF exceeds 50-page limit")
+            raise ValueError(f"PDF parsing failed ({result})")
+        return result
+    finally:
+        receive.close()
+        process.join(timeout=0.2)
+        if process.is_alive():
+            process.terminate()
+            process.join()
+
+
 def extract_text(filename: str, data: bytes) -> str:
     suffix = Path(filename).suffix.lower()
     try:
@@ -78,15 +126,12 @@ def extract_text(filename: str, data: bytes) -> str:
                     raise ValueError("HWPX contains no document sections")
                 return "\n".join(xml_paragraph_text(archive.read(name)) for name in sections)
         if suffix == ".pdf":
-            from pypdf import PdfReader
-
-            reader = PdfReader(io.BytesIO(data))
-            if len(reader.pages) > MAX_PDF_PAGES:
-                raise HTTPException(status_code=400, detail="PDF exceeds 50-page limit")
-            return "\n".join(page.extract_text() or "" for page in reader.pages)
+            return extract_pdf_text(data)
     except HTTPException:
         raise
-    except (UnicodeDecodeError, zipfile.BadZipFile, KeyError, ElementTree.ParseError, ValueError) as exc:
+    except TimeoutError as exc:
+        raise HTTPException(status_code=408, detail="PDF parsing timed out") from exc
+    except (UnicodeDecodeError, zipfile.BadZipFile, KeyError, ElementTree.ParseError, DefusedXmlException, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid {suffix[1:].upper()} file: {exc}") from exc
     except Exception as exc:
         if suffix == ".pdf":
@@ -130,9 +175,36 @@ def log_request(
     }
     if error:
         record["error"] = error
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    with request_log_lock, (LOG_DIR / "requests.jsonl").open("a", encoding="utf-8") as log:
-        log.write(json.dumps(record, ensure_ascii=False) + "\n")
+    append_jsonl("requests.jsonl", record, request_log_lock)
+
+
+def append_jsonl(name: str, record: dict, lock: threading.Lock) -> bool:
+    line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
+    path = LOG_DIR / name
+    if len(line) > MAX_LOG_BYTES:
+        logger.warning("Skipping %s record larger than log limit", name)
+        return False
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with lock, (LOG_DIR / f".{name}.lock").open("a") as guard:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
+            if shutil.disk_usage(LOG_DIR).free < MIN_LOG_FREE_BYTES:
+                logger.warning("Skipping %s write: less than %d bytes free", name, MIN_LOG_FREE_BYTES)
+                return False
+            if path.exists() and path.stat().st_size + len(line) > MAX_LOG_BYTES:
+                for index in range(MAX_LOG_BACKUPS, 0, -1):
+                    backup = path.with_name(f"{name}.{index}")
+                    source = path if index == 1 else path.with_name(f"{name}.{index - 1}")
+                    if index == MAX_LOG_BACKUPS:
+                        backup.unlink(missing_ok=True)
+                    if source.exists():
+                        source.replace(backup)
+            with path.open("ab") as log:
+                log.write(line)
+            return True
+    except OSError as exc:
+        logger.warning("Skipping %s write after filesystem error: %s", name, type(exc).__name__)
+        return False
 
 
 def run_model(model, sentences: list[str]) -> tuple[list[str], list[bool], list[str | None]]:
@@ -222,10 +294,12 @@ async def simplify(background_tasks: BackgroundTasks, file: UploadFile = File(..
 
 @app.post("/feedback")
 def feedback(item: Feedback) -> dict[str, bool]:
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(item.model_dump(), ensure_ascii=False) + "\n"
-    with feedback_lock, (LOG_DIR / "feedback.jsonl").open("a", encoding="utf-8") as log:
-        log.write(line)
+    record = item.model_dump()
+    record["original"] = redact(record["original"])
+    record["simple"] = redact(record["simple"])
+    if not append_jsonl("feedback.jsonl", record, feedback_lock):
+        raise HTTPException(status_code=503, detail="Feedback logging temporarily unavailable",
+                            headers={"Retry-After": "30"})
     return {"saved": True}
 
 

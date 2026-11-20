@@ -1,7 +1,9 @@
 import io
 import json
+import logging
 import threading
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 from pypdf import PdfWriter
@@ -57,6 +59,12 @@ def zipped_file(entries):
     return buffer.getvalue()
 
 
+BILLION_LAUGHS = ('<!DOCTYPE lolz [<!ENTITY lol "lol">' + ''.join(
+    f'<!ENTITY lol{i} "' + '&lol;' * 10 + '">' if i == 1 else
+    f'<!ENTITY lol{i} "' + f'&lol{i - 1};' * 10 + '">' for i in range(1, 10)
+) + ']><w:document xmlns:w="urn:w"><w:p><w:t>&lol9;</w:t></w:p></w:document>')
+
+
 def test_simplify_extracts_docx_text():
     document = zipped_file({"word/document.xml": '<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>안내 문장입니다.</w:t></w:r></w:p></w:body></w:document>'})
 
@@ -75,6 +83,29 @@ def test_simplify_extracts_hwpx_text():
 
     assert response.status_code == 200
     assert response.json()["sentences"][0]["original"] == "공고 내용입니다."
+
+
+@pytest.mark.parametrize("xml", [
+    '<!DOCTYPE x [<!ENTITY ext SYSTEM "file:///etc/passwd">]><w:document xmlns:w="urn:w"><w:p><w:t>&ext;</w:t></w:p></w:document>',
+    BILLION_LAUGHS,
+])
+def test_simplify_rejects_xxe_and_entity_expansion(xml):
+    response = client.post("/simplify", files={"file": ("attack.docx", zipped_file({"word/document.xml": xml}))})
+
+    assert response.status_code == 400
+
+
+def test_simplify_times_out_pdf_parsing(monkeypatch):
+    buffer = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.write(buffer)
+    monkeypatch.setattr(api_main, "PDF_PARSE_TIMEOUT_SECONDS", 0)
+
+    response = client.post("/simplify", files={"file": ("slow.pdf", buffer.getvalue())})
+
+    assert response.status_code == 408
+    assert "timed out" in response.json()["detail"]
 
 
 def test_simplify_accepts_valid_pdf():
@@ -273,6 +304,46 @@ def test_feedback_appends_jsonl(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert (tmp_path / "feedback.jsonl").read_text(encoding="utf-8") == '{"model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up"}\n'
+
+
+def test_feedback_redacts_known_pii_before_logging(tmp_path):
+    response = client.post("/feedback", json={
+        "model_version": "v1", "original": "010-1234-5678로 문의", "simple": "010-1234-5678로 연락", "vote": "up",
+    })
+
+    record = json.loads((tmp_path / "feedback.jsonl").read_text(encoding="utf-8"))
+    assert response.status_code == 200
+    assert record["original"] == "[전화번호]로 문의"
+    assert record["simple"] == "[전화번호]로 연락"
+
+
+def test_jsonl_logs_rotate_with_a_bounded_history(tmp_path, monkeypatch):
+    monkeypatch.setattr(api_main, "MAX_LOG_BYTES", 60)
+    monkeypatch.setattr(api_main, "MAX_LOG_BACKUPS", 2)
+    monkeypatch.setattr(api_main, "MIN_LOG_FREE_BYTES", 0)
+
+    for index in range(6):
+        assert api_main.append_jsonl("feedback.jsonl", {"n": index, "value": "x" * 30}, threading.Lock())
+
+    files = list(tmp_path.glob("feedback.jsonl*"))
+    logs = [path for path in files if not path.name.endswith(".lock")]
+    assert len(logs) == 3
+    assert all(path.stat().st_size <= api_main.MAX_LOG_BYTES for path in logs)
+    assert sum(path.stat().st_size for path in logs) <= 3 * api_main.MAX_LOG_BYTES
+
+
+def test_feedback_stops_writing_when_disk_is_low(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(api_main, "MIN_LOG_FREE_BYTES", 100)
+    monkeypatch.setattr(api_main.shutil, "disk_usage", lambda _: SimpleNamespace(free=0))
+
+    with caplog.at_level(logging.WARNING):
+        response = client.post("/feedback", json={
+            "model_version": "v1", "original": "원문", "simple": "쉬운 말", "vote": "up",
+        })
+
+    assert response.status_code == 503
+    assert not (tmp_path / "feedback.jsonl").exists()
+    assert "Skipping feedback.jsonl write" in caplog.text
 
 
 def test_feedback_rejects_strings_over_2000_characters():

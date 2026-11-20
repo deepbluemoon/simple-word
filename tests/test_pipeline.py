@@ -71,6 +71,19 @@ def test_failure_records_stage_and_stops(tmp_path):
     assert ok["status"] == "ok" and "last_failure" not in json.loads(ctx.state_path.read_text())
 
 
+def test_feedback_file_requires_review_before_pipeline_data_stages(tmp_path):
+    ctx = ctx_for(tmp_path)
+    ctx.data_dir.mkdir(parents=True)
+    (ctx.data_dir / "feedback.jsonl").write_text('{"vote":"up"}\n')
+
+    report = run_pipeline(pipeline.data_stages(), ctx)
+
+    assert report["status"] == "failed"
+    assert report["failed_stage"] == "feedback_review_guard"
+    assert "review" in report["stages"][0]["error"]
+    assert all(stage["status"] == "not_run" for stage in report["stages"][1:])
+
+
 def test_main_returns_1_on_failure(tmp_path, monkeypatch):
     def boom(ctx):
         raise RuntimeError("x")
