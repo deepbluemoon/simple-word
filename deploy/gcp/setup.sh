@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-PROJECT=simple-word-515207
+source "$(dirname -- "$0")/common.sh"
+CONFIGURED_PROJECT=$PROJECT
 BUDGET_ONLY=false
 while (($#)); do
   case "$1" in
@@ -10,7 +11,10 @@ while (($#)); do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
-source "$(dirname -- "$0")/common.sh"
+if [[ "$PROJECT" != "$CONFIGURED_PROJECT" ]]; then
+  echo "This setup is scoped to project $CONFIGURED_PROJECT" >&2
+  exit 2
+fi
 
 if [[ "$BUDGET_ONLY" == true ]]; then
   gcloud_project services enable billingbudgets.googleapis.com
