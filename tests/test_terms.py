@@ -1,4 +1,16 @@
+import re
+
+from simple_word.terms import found
 from training.terms import coverage, merge_dicts, parse_law_xml, parse_nikl
+
+
+def test_found_matches_original_regex_results():
+    terms = ["법률", "기관", "governance", "수", "", "가-나", "A.B"]
+    texts = ["법률에 따라", "대한법률", "X기관", "(기관)", "governance와", "governance2", "수", "가-나", "A.B"]
+    for term in terms:
+        pattern = re.compile(r"(?<![가-힣A-Za-z])" + re.escape(term))
+        for text in texts:
+            assert found(term, text) == (pattern.search(text) is not None)
 
 
 def test_nikl_normalizes_aliases_and_filters_generic_short_terms():
