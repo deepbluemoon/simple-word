@@ -12,6 +12,7 @@ PII = [  # 순서 중요: 주민번호가 전화번호 형식에 먼저 걸리�
 ]
 STOP_LINE = re.compile(r"^\W*(?:(?:담당\s*자|담당\s*부서|문의처?)\s*[:：]|붙\s*임\b)")  # 이 줄부터 끝까지 버림
 ATTACH = re.compile(r"\.(?:hwpx?|pdf|docx?|xlsx?|zip|jpe?g|png)\b", re.I)
+LICENSES = {"KOGL-1", "DATAGOKR-free"}  # 공공누리 제1유형, 공공데이터포털 이용허락 제한 없음
 BULLET = re.compile(r"^(?:[-–―·•◦○●□■◇◆▶▷△▲ㅇ※*<>]+|\d+[.)]|[①-⑳])\s*")
 
 
@@ -84,7 +85,7 @@ def preprocess(data_dir):
             if not doc["body"].strip():
                 drop("doc_no_body", doc["id"])
                 continue
-            if doc["license"] != "KOGL-1":
+            if doc["license"] not in LICENSES:
                 drop("doc_license", doc["id"])
                 continue
             idx = 0
