@@ -1,0 +1,41 @@
+{
+ "version": "v2",
+ "test": "/Users/pioneer13/simple-word/data/eval/eval_set.jsonl",
+ "metrics": {
+  "number_date_amount_match_rate": 1.0,
+  "preserved_terms_retention_rate": 1.0,
+  "difficult_term_retention_rate": 0.6316,
+  "sentence_length_reduction_rate": -0.081,
+  "sari": 0.3932,
+  "sari_morpheme": 0.3969,
+  "counts": {
+   "sentences": 193,
+   "preserved_terms": 39,
+   "difficult_terms": 19,
+   "difficult_terms_by_source": {
+    "국립국어원_15130006": 19
+   }
+  },
+  "bert_score_ref": 0.8276,
+  "bert_score_source": 0.8348,
+  "fallback_rate": 0.1917,
+  "cpu_p95_ms_per_sentence": 92.8,
+  "model_memory_mb": 271.6,
+  "eval_model": "onnx_int8_cpu",
+  "test_set_sha1": "e3455f4b5dafa67754c2415009bc595fa282d6c2",
+  "diagnostics": {
+   "source_copy": {
+    "count": 193,
+    "sari": 0.5176,
+    "sari_morpheme": 0.5324,
+    "bert_score_ref": 0.9142
+   },
+   "teacher": {
+    "count": 193,
+    "sari": 0.3203,
+    "sari_morpheme": 0.3195,
+    "bert_score_ref": 0.7778
+   }
+  }
+ }
+}
