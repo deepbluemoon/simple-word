@@ -61,7 +61,7 @@ test('uploads a public document, sends sentence feedback, and restores the resul
   await page.getByRole('tab', { name: '원문 보기' }).click()
   await expect(page.locator('.term-ruby rt').first()).toContainText('협치')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.locator('.term-ruby').first().click()
+  await page.locator('.term-ruby mark').first().click()
   await expect(page.locator('.clause-note')).toContainText(actual.sentences[0].original)
   await expect(page.locator('.clause-note')).toContainText(actual.sentences[0].fallback ? actual.sentences[0].original : actual.sentences[0].simple)
   await expect(page.locator('.clause-note')).toContainText('국립국어원 공공언어 평가용 용어 목록 · 공공누리 제1유형')
