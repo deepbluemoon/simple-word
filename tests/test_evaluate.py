@@ -61,3 +61,13 @@ def test_evaluate_scores_against_reference_and_records_diagnostics(tmp_path, mon
     assert metrics["diagnostics"]["teacher"]["bert_score_ref"] == 0.76
     assert metrics["diagnostics"]["teacher"]["count"] == 2
     assert "sari_morpheme" in metrics["diagnostics"]["source_copy"]
+
+
+def test_bert_score_groups_unpacks_candidate_and_target_lists(monkeypatch):
+    import sys, types
+    f1 = types.SimpleNamespace(tolist=lambda: [0.5, 0.7, 0.9])  # torch 없이: score()[2].tolist()만 흉내
+    fake = types.SimpleNamespace(score=lambda c, r, **k: (None, None, f1))
+    monkeypatch.setitem(sys.modules, "bert_score", fake)
+    from training.evaluate import bert_score_groups
+    assert bert_score_groups({"model": (["a", "b"], ["x", "y"]), "teacher": (["c"], ["z"]), "empty": ([], [])}) == {
+        "model": 0.6, "teacher": 0.9}

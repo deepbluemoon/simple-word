@@ -83,7 +83,7 @@ def bert_score_groups(groups):
     from bert_score import score  # bert-base-multilingual-cased (lang="ko" 기본값)
 
     names, cands, refs, spans = [], [], [], {}
-    for name, candidates, targets in groups.items():
+    for name, (candidates, targets) in groups.items():
         if candidates:
             start = len(cands)
             names.append(name)
