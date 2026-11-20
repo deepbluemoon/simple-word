@@ -15,12 +15,18 @@ export function saveReaderSize(size: ReaderSize) {
 }
 
 export function groupParagraphs(sentences: SentenceResult[]) {
+  return groupSentenceParagraphs(sentences).map((paragraph) =>
+    paragraph.map((sentence) => sentence.fallback ? sentence.original : sentence.simple).join(' '),
+  )
+}
+
+export function groupSentenceParagraphs(sentences: SentenceResult[]) {
   const paragraphs: SentenceResult[][] = []
   let currentId: number | undefined
   for (const sentence of sentences) {
-    const id = sentence.paragraph_id ?? 0
+    const id = sentence.paragraph ?? sentence.paragraph_id ?? 0
     if (id !== currentId) { paragraphs.push([]); currentId = id }
     paragraphs.at(-1)!.push(sentence)
   }
-  return paragraphs.map((paragraph) => paragraph.map((sentence) => sentence.simple).join(' '))
+  return paragraphs
 }

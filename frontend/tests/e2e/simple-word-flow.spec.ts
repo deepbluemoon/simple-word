@@ -23,12 +23,17 @@ test('CSP allows Vue scripts and dynamic inline styles', async ({ page }) => {
   await page.getByRole('button', { name: '글 붙여넣기' }).click()
   await page.getByRole('textbox', { name: '쉬운 말로 바꿀 공문서 내용' }).fill('안내 문장입니다.')
   await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
-  await expect(page.getByRole('progressbar', { name: '쉬운 말로 바꾸는 진행률' })).toBeVisible()
+  await expect(page.getByRole('progressbar', { name: '문서 처리 진행률' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '쉬운 말로 바꾼 결과' })).toBeVisible()
   expect(await page.locator('html').getAttribute('data-csp-violations')).toBeNull()
 })
 
 test('uploads a public document, sends sentence feedback, and restores the result after reload', async ({ page }) => {
+  await page.route('**/simplify', (route) => route.fulfill({ json: { model_version: 'e2e', sentences: [
+    { original: '신청서는 제출해야 합니다.', simple: '신청서는 내야 합니다.', fallback: false, paragraph: 0, paragraph_id: 0 },
+    { original: '수수료는 400원입니다.', simple: '수수료는 400원입니다.', fallback: true, fallback_reason: 'numbers', paragraph: 1, paragraph_id: 1 },
+  ] } }))
+  await page.route('**/feedback', (route) => route.fulfill({ json: { saved: true } }))
   await page.goto('/')
   await page.locator('input[type=file]').setInputFiles({
     name: '주민 안내문.txt',
@@ -40,7 +45,14 @@ test('uploads a public document, sends sentence feedback, and restores the resul
   await expect(page.getByRole('heading', { name: '쉬운 말로 바꾼 결과' })).toBeVisible()
   await expect(page.getByText(/개 문장에서 말이 바뀌었어요/)).toBeVisible()
   await expect(page.getByRole('navigation', { name: '진행 단계' })).toContainText('문장 나누기 완료')
-  await expect(page.getByText('신청은 2026년 12월 31일까지 해야 합니다.').first()).toBeVisible()
+  await expect(page.getByRole('tab', { name: '문서 보기' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.document-paragraph')).toHaveCount(2)
+  await expect(page.locator('.document-sentence mark')).toContainText('내야')
+  const fallbackSentence = page.locator('.document-sentence').nth(1)
+  await fallbackSentence.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.clause-note')).toContainText('수수료는 400원입니다.')
+  await expect(page.locator('.clause-note')).toContainText('숫자나 날짜를 안전하게 지키려고 원문을 유지했어요.')
   await page.getByRole('button', { name: /좋아요/ }).first().click()
   await expect(page.getByText('의견 감사합니다.')).toBeVisible()
   const resultUrl = page.url()
