@@ -9,12 +9,13 @@ services:
       - /srv/simple-word/logs:/app/logs
   proxy:
     ports:
+      - "80:80"
       - "443:443"
     environment:
-      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-moon.eta.pyhub.kr}
+      NGINX_SERVER_NAME: ${SIMPLE_WORD_DOMAIN:?set SIMPLE_WORD_DOMAIN}
       NGINX_HTTPS_REDIRECT: ${NGINX_HTTPS_REDIRECT:-on}
-      NGINX_TLS_FULLCHAIN: ${NGINX_TLS_FULLCHAIN:-/etc/letsencrypt/live/moon.eta.pyhub.kr/fullchain.pem}
-      NGINX_TLS_PRIVKEY: ${NGINX_TLS_PRIVKEY:-/etc/letsencrypt/live/moon.eta.pyhub.kr/privkey.pem}
     volumes:
       - ./nginx-tls.conf.template:/etc/nginx/templates/tls.conf.template:ro
-      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
+      - /etc/letsencrypt/live/${SIMPLE_WORD_DOMAIN:?set SIMPLE_WORD_DOMAIN}:/etc/letsencrypt/live/${SIMPLE_WORD_DOMAIN}:ro
+      - /etc/letsencrypt/archive/${SIMPLE_WORD_DOMAIN}:/etc/letsencrypt/archive/${SIMPLE_WORD_DOMAIN}:ro
+      - /srv/simple-word/certbot:/var/www/certbot:ro

@@ -7,7 +7,15 @@ if (( EUID != 0 )); then
 fi
 
 deploy_user="${SUDO_USER:-ubuntu}"
-domain="${SIMPLE_WORD_DOMAIN:-moon.eta.pyhub.kr}"
+domain="${SIMPLE_WORD_DOMAIN:-}"
+if [[ -z "$domain" ]]; then
+    echo "Set SIMPLE_WORD_DOMAIN to the DNS name before running bootstrap" >&2
+    exit 2
+fi
+if [[ ! "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ || "$domain" == *..* || ${#domain} -gt 253 ]]; then
+    echo "SIMPLE_WORD_DOMAIN must be a valid DNS hostname" >&2
+    exit 2
+fi
 user_home="$(getent passwd "$deploy_user" | cut -d: -f6)"
 if [[ -z "$user_home" || ! -s "$user_home/.ssh/authorized_keys" ]]; then
     echo "Refusing to change SSH settings: $deploy_user has no authorized_keys" >&2
@@ -93,26 +101,60 @@ docker_group="$(getent group docker | cut -d: -f1)"
 install -d -o "$deploy_user" -g "$docker_group" -m 0750 /srv/simple-word
 install -d -o "$deploy_user" -g "$docker_group" -m 0755 /srv/simple-word/models
 install -d -o 10001 -g 10001 -m 0750 /srv/simple-word/logs
+install -d -o "$deploy_user" -g "$docker_group" -m 0755 /srv/simple-word/certbot
+install -d -m 0750 /etc/simple-word
+cat > /etc/simple-word/deploy.env <<EOF
+COMPOSE_PROJECT_NAME=simple-word
+COMPOSE_FILES=/srv/simple-word/deploy/compose.yaml:/srv/simple-word/deploy/compose.lightsail.yaml
+SIMPLE_WORD_DOMAIN=$domain
+HOST_PORT=80
+EOF
+chmod 0640 /etc/simple-word/deploy.env
+chown root:"$docker_group" /etc/simple-word/deploy.env
+# shellcheck disable=SC1091
+source /etc/simple-word/deploy.env
 
-if ! certbot certificates 2>/dev/null | grep -Fq "Domains: $domain"; then
-    if certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email \
-        --preferred-challenges http -d "$domain"; then
-        echo "Issued the TLS certificate for $domain."
-    else
-        echo "WARNING: TLS issuance failed; verify Lightsail inbound TCP/80 and rerun this script." >&2
-    fi
+acme_proxy="$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=proxy' --format '{{.ID}}' | head -n 1)"
+if [[ -z "$acme_proxy" ]]; then
+    docker run --detach --name simple-word-acme --publish 80:80 \
+        --volume /srv/simple-word/certbot:/usr/share/nginx/html:ro nginx:1.27-alpine
+    cleanup_acme() { docker rm --force simple-word-acme >/dev/null 2>&1 || true; }
+    trap cleanup_acme EXIT
 fi
 
-install -d -m 0755 /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
-cat > /etc/letsencrypt/renewal-hooks/pre/stop-simple-word-proxy <<'EOF'
+if ! certbot certificates 2>/dev/null | grep -Fq "Domains: $domain"; then
+    certbot certonly --webroot -w /srv/simple-word/certbot --non-interactive --agree-tos \
+        --register-unsafely-without-email --preferred-challenges http -d "$domain" || {
+        echo "ERROR: TLS issuance failed for $domain; check TCP/80 and Certbot logs." >&2
+        exit 1
+    }
+    echo "Issued the TLS certificate for $domain."
+fi
+
+certbot reconfigure --cert-name "$domain" --authenticator webroot --webroot-path /srv/simple-word/certbot
+if [[ -z "$acme_proxy" ]]; then
+    cleanup_acme
+    trap - EXIT
+fi
+
+install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/reload-simple-word-proxy <<'EOF'
 #!/usr/bin/env bash
-docker stop simpleword-proxy-1 >/dev/null 2>&1 || true
+set -Eeuo pipefail
+source /etc/simple-word/deploy.env
+proxy_id="$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=proxy' --format '{{.ID}}' | head -n 1)"
+if [[ -z "$proxy_id" ]]; then
+    echo "WARNING: certificate renewed, but no $COMPOSE_PROJECT_NAME proxy is running to reload" >&2
+    exit 0
+fi
+docker exec "$proxy_id" nginx -t
+docker exec "$proxy_id" nginx -s reload
+echo "Reloaded $COMPOSE_PROJECT_NAME proxy after certificate renewal."
 EOF
-cat > /etc/letsencrypt/renewal-hooks/post/start-simple-word-proxy <<'EOF'
-#!/usr/bin/env bash
-docker start simpleword-proxy-1 >/dev/null 2>&1 || true
-EOF
-chmod 0755 /etc/letsencrypt/renewal-hooks/pre/stop-simple-word-proxy \
+chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/reload-simple-word-proxy
+rm -f /etc/letsencrypt/renewal-hooks/pre/stop-simple-word-proxy \
     /etc/letsencrypt/renewal-hooks/post/start-simple-word-proxy
 systemctl enable --now certbot.timer
 

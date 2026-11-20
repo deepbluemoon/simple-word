@@ -2,8 +2,14 @@
 set -Eeuo pipefail
 
 DEPLOY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="$DEPLOY_DIR/compose.yaml"
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-/etc/simple-word/deploy.env}"
+if [[ -r "$DEPLOY_ENV_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$DEPLOY_ENV_FILE"
+fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-simple-word}"
+COMPOSE_FILES="${COMPOSE_FILES:-$DEPLOY_DIR/compose.yaml}"
+SIMPLE_WORD_DOMAIN="${SIMPLE_WORD_DOMAIN:-}"
 DEPLOY_HOST="${DEPLOY_HOST:-127.0.0.1}"
 HOST_PORT="${HOST_PORT:-8000}"
 DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-${HOME}/.simple-word}"
@@ -15,7 +21,15 @@ fi
 export COMPOSE_PROJECT_NAME HOST_PORT
 
 compose() {
-    docker compose --project-name "$COMPOSE_PROJECT_NAME" --file "$COMPOSE_FILE" "$@"
+    local files=() file
+    IFS=: read -r -a files <<< "$COMPOSE_FILES"
+    local args=()
+    for file in "${files[@]}"; do args+=(--file "$file"); done
+    if [[ -r "$DEPLOY_ENV_FILE" ]]; then
+        docker compose --env-file "$DEPLOY_ENV_FILE" --project-name "$COMPOSE_PROJECT_NAME" "${args[@]}" "$@"
+    else
+        docker compose --project-name "$COMPOSE_PROJECT_NAME" "${args[@]}" "$@"
+    fi
 }
 
 current_image() {
@@ -50,7 +64,19 @@ save_previous() {
 }
 
 health_url() {
-    printf 'http://%s:%s/health' "$DEPLOY_HOST" "$HOST_PORT"
+    if [[ "$COMPOSE_FILES" == *compose.lightsail.yaml* && -n "$SIMPLE_WORD_DOMAIN" ]]; then
+        printf 'https://%s/health' "$SIMPLE_WORD_DOMAIN"
+    else
+        printf 'http://%s:%s/health' "$DEPLOY_HOST" "$HOST_PORT"
+    fi
+}
+
+smoke_url() {
+    if [[ "$COMPOSE_FILES" == *compose.lightsail.yaml* && -n "$SIMPLE_WORD_DOMAIN" ]]; then
+        printf 'https://%s' "$SIMPLE_WORD_DOMAIN"
+    else
+        printf 'http://%s:%s' "$DEPLOY_HOST" "$HOST_PORT"
+    fi
 }
 
 check_proxy_health() {

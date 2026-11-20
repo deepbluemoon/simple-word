@@ -17,4 +17,4 @@ if [[ -z "$expected" ]]; then
     echo "Usage: EXPECTED_MODEL_VERSION=<model-version> $0" >&2
     exit 2
 fi
-bash "$DEPLOY_DIR/rolling.sh" "$previous" "$expected"
+SKIP_PROXY_UPDATE=1 bash "$DEPLOY_DIR/rolling.sh" "$previous" "$expected"

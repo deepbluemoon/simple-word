@@ -90,6 +90,14 @@ done) &
 request_pid=$!
 trap 'touch "$WORK_DIR/stop-requests"; wait "$request_pid" 2>/dev/null || true; cleanup' EXIT
 bash "$DEPLOY_DIR/rolling.sh" "$GOOD_IMAGE" "$MODEL_VERSION"
+proxy_id="$(compose ps --all --quiet proxy)"
+docker exec "$proxy_id" grep -q 'limit_conn_status 429' /etc/nginx/templates/default.conf.template
+compose restart proxy >/dev/null
+for _ in {1..30}; do
+    if curl --fail --silent --max-time 2 "http://127.0.0.1:$HOST_PORT/health" >/dev/null; then break; fi
+    sleep 1
+done
+docker exec "$proxy_id" grep -q 'limit_conn_status 429' /etc/nginx/conf.d/default.conf
 touch "$WORK_DIR/stop-requests"
 wait "$request_pid"
 if ! awk '$1 !~ /^2/ { failed=1 } END { exit failed }' "$WORK_DIR/statuses"; then
