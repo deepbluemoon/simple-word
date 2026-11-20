@@ -154,7 +154,7 @@ def _generate_reference(model, tokenizer, inputs, num_beams, placeholders, force
         )
         text = tokenizer.decode(generated[0], skip_special_tokens=True).strip()
         text = unmask(text, slots) if placeholders else text
-        if (text is None or not text or len(text) * 2 < len(source)
+        if (text is None or not text or (num_beams > 1 and len(text) * 2 < len(source))
                 or numbers(text) != numbers(source)
                 or missing_terms(source, text, preserve_terms())):
             text = source
@@ -200,16 +200,18 @@ def export(version, model_root="models", hf_dir=None, tokenizer_json=None, int8=
     meta = {"version": version, "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
             "data_snapshot": train_metrics.get("data_snapshot"), "base_model": train_metrics.get("base_model"),
             "metrics": {"train": train_metrics, "model_dir_mb": None},
-            "placeholders": False, "decoding": {"force_placeholders": force_placeholders, "num_beams": num_beams}}
+            "placeholders": False, "quantization": "dynamic-int8" if int8 else "fp32",
+            "decoding": {"force_placeholders": force_placeholders, "num_beams": num_beams}}
     (out / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     simp = Simplifier(str(out), force_placeholders=force_placeholders)  # parity는 서빙과 같은 디코딩 설정으로
     meta["placeholders"] = simp.placeholders
-    outputs = _generate_reference(hf_model, hf_tokenizer, PARITY_INPUTS, num_beams,
-                                  simp.placeholders, force_placeholders)
     actual = simp.simplify(PARITY_INPUTS)
-    _assert_parity(outputs, actual)
+    if not int8:
+        outputs = _generate_reference(hf_model, hf_tokenizer, PARITY_INPUTS, num_beams,
+                                      simp.placeholders, force_placeholders)
+        _assert_parity(outputs, actual)
     (out / "parity.jsonl").write_text("".join(json.dumps({"input": i, "output": o}, ensure_ascii=False) + "\n"
-                                              for i, o in zip(PARITY_INPUTS, outputs)), encoding="utf-8")
+                                              for i, o in zip(PARITY_INPUTS, actual)), encoding="utf-8")
     meta["metrics"]["model_dir_mb"] = dir_mb(out)  # hf/ 하위 폴더는 제외, 서빙에 올리는 파일만
     (out / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return meta

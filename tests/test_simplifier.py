@@ -58,6 +58,44 @@ def test_hf_parity_reference_uses_requested_beam_settings(monkeypatch):
         _assert_parity(["HF output"], ["ONNX output"])
 
 
+def test_int8_export_uses_onnx_outputs_for_parity_without_fp32_equality_check(tmp_path, monkeypatch):
+    from training import export as export_module
+
+    class HFModel:
+        @classmethod
+        def from_pretrained(cls, _path): return cls()
+        def eval(self): return self
+        def cpu(self): return self
+
+    class HFTokenizer:
+        @classmethod
+        def from_pretrained(cls, _path): return cls()
+
+    class ServingModel:
+        placeholders = False
+        def __init__(self, *_args, **_kwargs): pass
+        def simplify(self, inputs): return [f"onnx:{text}" for text in inputs]
+
+    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
+        BartForConditionalGeneration=HFModel, AutoTokenizer=HFTokenizer))
+    monkeypatch.setattr(export_module, "PARITY_INPUTS", ["input"])
+    monkeypatch.setattr(export_module, "export_onnx", lambda _model, path: [
+        (path / f"{name}.onnx").touch() for name in ("encoder", "decoder")])
+    monkeypatch.setattr(export_module, "quantize", lambda _path: None)
+    monkeypatch.setattr(export_module, "_generate_reference", lambda *_args: pytest.fail("INT8 must not require exact fp32 match"))
+    monkeypatch.setattr(export_module, "_assert_parity", lambda *_args: pytest.fail("INT8 must not require exact fp32 match"))
+    monkeypatch.setattr("simple_word.model.Simplifier", ServingModel)
+    tokenizer_json = tmp_path / "tokenizer.json"
+    tokenizer_json.write_text("{}", encoding="utf-8")
+
+    metadata = export_module.export("int8-model", tmp_path / "models", hf_dir=tmp_path / "hf",
+                                    tokenizer_json=tokenizer_json, int8=True)
+
+    parity = json.loads((tmp_path / "models/int8-model/parity.jsonl").read_text(encoding="utf-8"))
+    assert parity == {"input": "input", "output": "onnx:input"}
+    assert metadata["quantization"] == "dynamic-int8"
+
+
 def test_simplifier_is_dummy_without_model(tmp_path):
     assert Simplifier(str(tmp_path)).simplify(["가 나", "다"]) == ["가 나", "다"]
 
@@ -242,8 +280,113 @@ def test_beam_uses_next_candidate_when_top_candidate_fails_number_guard(monkeypa
     assert simp.decoder.batch_sizes == [1, 2]  # 한 단계마다 모든 살아 있는 빔을 한 번에 추론
 
 
+def test_beam_uses_global_top_two_width_and_ignores_lower_ranked_eos():
+    import numpy as np
+
+    class Tok:
+        def encode(self, _text, add_special_tokens=False): return type("E", (), {"ids": [7]})()
+        def decode(self, ids, skip_special_tokens=True):
+            return {(1,): "", (2, 1): "early-two", (2, 4, 1): "branch-two",
+                    (3, 5, 1): "branch-three"}.get(tuple(ids), "other")
+
+    class Encoder:
+        def run(self, *_args): return [np.zeros((1, 1, 1, 1), dtype=np.float32)]
+        def get_outputs(self): return [type("O", (), {"name": "cross_k"})()]
+
+    class Decoder:
+        def __init__(self): self.batch_sizes = []
+        def get_inputs(self): return [type("I", (), {"name": "cross_k"})()]
+        def run(self, _outputs, feed):
+            batch = feed["input_ids"].shape[0]
+            step = int(feed["position_ids"][0, 0])
+            self.batch_sizes.append(batch)
+            logits = np.full((batch, 1, 8), -100.0, dtype=np.float32)
+            if step == 0:
+                logits[0, 0, 2:5] = [10.0, 9.0, 7.0]
+                logits[0, 0, 1] = 8.0  # global rank 2: EOS must be ignored
+            elif step == 1:
+                logits[0, 0, 1], logits[0, 0, 4] = 10.0, 9.9
+                logits[1, 0, 1], logits[1, 0, 5] = 8.0, 7.0  # EOS rank 2 ignored
+            else:
+                logits[:, 0, 1] = 10.0
+                logits[:, 0, 6] = 9.0
+            return [logits]
+
+    simp = Simplifier.__new__(Simplifier)
+    simp.dummy, simp.tok, simp.encoder, simp.decoder = False, Tok(), Encoder(), Decoder()
+    simp.num_beams = 2
+
+    outputs = simp._candidates("source")
+
+    assert "" not in outputs
+    assert "early-two" in outputs
+    assert simp.decoder.batch_sizes == [1, 2, 2]
+
+
 def test_empty_and_short_beam_candidates_are_skipped():
     simp = Simplifier.__new__(Simplifier)
-    simp.dummy, simp.placeholders = False, False
+    simp.dummy, simp.placeholders, simp.num_beams = False, False, 4
     simp._candidates = lambda _text, *_args: ["", "짧음", "가" * 10]
     assert simp.simplify_explained(["가" * 20]) == [("가" * 10, False, None)]
+
+
+def test_greedy_preserves_outputs_shorter_than_half_the_source():
+    simp = Simplifier.__new__(Simplifier)
+    simp.dummy, simp.placeholders, simp.num_beams = False, False, 1
+    simp._candidates = lambda _text, *_args: ["가" * 9]
+    assert simp.simplify_explained(["가" * 20]) == [("가" * 9, False, None)]
+
+
+def test_greedy_stops_when_eos_is_the_best_token():
+    import numpy as np
+
+    class Tok:
+        def encode(self, _text, add_special_tokens=False): return type("E", (), {"ids": [7]})()
+        def decode(self, ids, skip_special_tokens=True): return ""
+
+    class Encoder:
+        def run(self, *_args): return [np.zeros((1, 1, 1, 1), dtype=np.float32)]
+        def get_outputs(self): return [type("O", (), {"name": "cross_k"})()]
+
+    class Decoder:
+        def __init__(self): self.calls = 0
+        def get_inputs(self): return [type("I", (), {"name": "cross_k"})()]
+        def run(self, *_args):
+            self.calls += 1
+            logits = np.full((1, 1, 8), -100.0, dtype=np.float32)
+            logits[0, 0, 1], logits[0, 0, 2] = 10.0, 9.0
+            return [logits]
+
+    simp = Simplifier.__new__(Simplifier)
+    simp.dummy, simp.tok, simp.encoder, simp.decoder = False, Tok(), Encoder(), Decoder()
+    simp.num_beams = 1
+    assert simp._candidates("source") == [""]
+    assert simp.decoder.calls == 1
+
+
+def test_all_negative_infinity_logits_report_decode_or_placeholder_fallback(monkeypatch):
+    import numpy as np
+    import simple_word.model as model_module
+
+    class Tok:
+        def encode(self, _text, add_special_tokens=False): return type("E", (), {"ids": [7]})()
+        def token_to_id(self, _token): return 2
+
+    class Encoder:
+        def run(self, *_args): return [np.zeros((1, 1, 1, 1), dtype=np.float32)]
+        def get_outputs(self): return [type("O", (), {"name": "cross_k"})()]
+
+    class Decoder:
+        def get_inputs(self): return [type("I", (), {"name": "cross_k"})()]
+        def run(self, _outputs, feed):
+            return [np.full((feed["input_ids"].shape[0], 1, 8), -np.inf, dtype=np.float32)]
+
+    simp = Simplifier.__new__(Simplifier)
+    simp.dummy, simp.tok, simp.encoder, simp.decoder = False, Tok(), Encoder(), Decoder()
+    simp.placeholders, simp.num_beams, simp.force_placeholders = False, 2, False
+    monkeypatch.setattr(model_module, "preserve_terms", lambda: [])
+    assert simp.simplify_explained(["원문입니다."]) == [("원문입니다.", True, "decode")]
+
+    simp.placeholders, simp.force_placeholders = True, True
+    monkeypatch.setattr(model_module, "mask", lambda _text: ("masked", ["<N0>"]))
+    assert simp.simplify_explained(["원문입니다."]) == [("원문입니다.", True, "placeholder")]

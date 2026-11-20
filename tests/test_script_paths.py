@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,3 +29,27 @@ def test_benchmark_runs_from_outside_repo_without_pythonpath(tmp_path):
 def test_regenerate_parity_help_imports_from_outside_repo_without_pythonpath(tmp_path):
     result = _run("regenerate_parity.py", "--help", cwd=tmp_path)
     assert result.returncode == 0, result.stderr
+
+
+def test_int8_parity_regeneration_uses_onnx_without_hf_equality(tmp_path, monkeypatch):
+    from scripts import regenerate_parity
+
+    artifact = tmp_path / "models" / "v2"
+    artifact.mkdir(parents=True)
+    (artifact / "metadata.json").write_text(json.dumps({"decoding": {"num_beams": 4}}), encoding="utf-8")
+
+    class Model:
+        placeholders = False
+        force_placeholders = False
+        def __init__(self, _path): pass
+        def simplify(self, _inputs): return ["onnx output"]
+
+    monkeypatch.setattr(regenerate_parity, "PARITY_INPUTS", ["source"])
+    monkeypatch.setattr(regenerate_parity, "Simplifier", Model)
+    monkeypatch.setattr(regenerate_parity, "hf_reference_outputs", lambda *_args: pytest.fail("INT8 does not require fp32 equality"))
+    monkeypatch.setattr(sys, "argv", ["regenerate_parity.py", "v2", "--models-dir", str(tmp_path / "models")])
+
+    regenerate_parity.main()
+
+    record = json.loads((artifact / "parity.jsonl").read_text(encoding="utf-8"))
+    assert record == {"input": "source", "output": "onnx output"}

@@ -75,11 +75,16 @@ class Simplifier:
             return [(s, False, None) for s in sentences]
         out = []
         for s in sentences:
+            slots = []
+            force = getattr(self, "force_placeholders", False)
             if getattr(self, "placeholders", False):
                 masked, slots = mask(s)
-                candidates = self._candidates(masked, slots, getattr(self, "force_placeholders", False))
+                candidates = self._candidates(masked, slots, force)
             else:
                 candidates = self._candidates(s)
+            if candidates is None:
+                out.append((s, True, "placeholder" if force and slots else "decode"))
+                continue
             reason = None
             for candidate in candidates:
                 if candidate is None:
@@ -88,7 +93,7 @@ class Simplifier:
                 y = unmask(candidate, slots) if getattr(self, "placeholders", False) else candidate
                 if y is None:
                     reason = reason or "placeholder"
-                elif not y or len(y) * 2 < len(s):
+                elif not y or (getattr(self, "num_beams", 1) > 1 and len(y) * 2 < len(s)):
                     reason = reason or "length"
                 elif numbers(y) != numbers(s):
                     reason = reason or "numbers"
@@ -114,7 +119,9 @@ class Simplifier:
         ids = ids + [EOS]
         x = np.array([ids], dtype=np.int64)
         mask = np.ones_like(x)
+        width = getattr(self, "num_beams", 1)
         cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})
+        cross = [np.repeat(value, width, axis=0) for value in cross]
         heads, hd = cross[0].shape[1], cross[0].shape[3]
         past_names = [i.name for i in self.decoder.get_inputs() if i.name.startswith("past_")]
         need, banned = set(), []
@@ -124,12 +131,11 @@ class Simplifier:
             banned = [i for t, i in ph.items() if t not in slots and i is not None]
         beams = [([EOS], 0.0, [])]
         finished = []
-        width = getattr(self, "num_beams", 1)
         steps = min(2 * len(ids) + 16, max_len)
         for step in range(steps):
             batch = len(beams)
             feed = {"attention_mask": np.repeat(mask, batch, axis=0)}
-            feed.update((output.name, np.repeat(value, batch, axis=0))
+            feed.update((output.name, value[:batch])
                         for output, value in zip(self.encoder.get_outputs(), cross))
             if past_names:
                 past = [np.concatenate([beam[2][index] for beam in beams], axis=0)
@@ -139,8 +145,11 @@ class Simplifier:
             feed["input_ids"] = np.array([[beam[0][-1]] for beam in beams], dtype=np.int64)
             feed["position_ids"] = np.full((batch, 1), step, dtype=np.int64)
             logits, *next_past = self.decoder.run(None, feed)
-            log_probs = logits[:, -1, :].astype(np.float64)
-            log_probs -= np.logaddexp.reduce(log_probs, axis=1, keepdims=True)
+            logits = logits[:, -1, :].astype(np.float64)
+            normalizers = np.logaddexp.reduce(logits, axis=1, keepdims=True)
+            valid_rows = np.isfinite(normalizers[:, 0])
+            log_probs = np.full_like(logits, -np.inf)
+            log_probs[valid_rows] = logits[valid_rows] - normalizers[valid_rows]
             candidates = []
             for parent, (tokens, score, _) in enumerate(beams):
                 row = log_probs[parent].copy()
@@ -148,7 +157,7 @@ class Simplifier:
                     row[banned] = -np.inf
                     if force and need - set(tokens):
                         row[EOS] = -np.inf
-                count = min(width, np.isfinite(row).sum())
+                count = min(2 * width, np.isfinite(row).sum())
                 if not count:
                     continue
                 cutoff = np.partition(row, -count)[-count]
@@ -159,12 +168,15 @@ class Simplifier:
                     candidates.append((score + float(row[token]), parent, int(token)))
             candidates.sort(key=lambda item: (-item[0], item[2], item[1]))
             next_beams = []
-            for score, parent, token in candidates:
+            for rank, (score, parent, token) in enumerate(candidates[:2 * width]):
                 tokens = beams[parent][0] + [token]
                 if token == EOS:
-                    finished.append((tokens, score))
-                    finished.sort(key=lambda item: (-self._normalized_score(item[1], item[0]), item[0]))
-                    del finished[width:]
+                    if rank < width:
+                        finished.append((tokens, score))
+                        finished.sort(key=lambda item: (-self._normalized_score(item[1], item[0]), item[0]))
+                        del finished[width:]
+                    if width == 1 and rank == 0:
+                        break
                 elif len(next_beams) < width:
                     next_beams.append((tokens, score, [value[parent:parent + 1] for value in next_past]))
             beams = next_beams
@@ -176,6 +188,8 @@ class Simplifier:
                 break
         ranked = finished + [(tokens, score) for tokens, score, _ in beams]
         ranked.sort(key=lambda item: (-self._normalized_score(item[1], item[0]), item[0]))
+        if not ranked:
+            return None
         return [self.tok.decode(tokens[1:], skip_special_tokens=True).strip() for tokens, _ in ranked[:width]]
 
     @staticmethod
