@@ -119,12 +119,14 @@ def test_simplify_accepts_valid_pdf():
     assert response.status_code == 200
 
 
-def test_simplify_keeps_pypdf_error_message_for_malformed_pdf():
+def test_simplify_logs_pypdf_error_but_returns_only_type_for_malformed_pdf(caplog):
     response = client.post("/simplify", files={"file": ("broken.pdf", b"not a PDF")})
 
     assert response.status_code == 400
     assert "Invalid PDF file" in response.json()["detail"]
-    assert "Stream has ended unexpectedly" in response.json()["detail"]
+    assert "PdfStreamError" in response.json()["detail"]
+    assert "Stream has ended unexpectedly" not in response.json()["detail"]
+    assert "Stream has ended unexpectedly" in caplog.text
 
 
 def test_pdf_worker_eof_is_logged_and_returns_500(monkeypatch, caplog):

@@ -14,7 +14,7 @@ def extract_pdf_worker(data: bytes, connection, max_pages: int) -> None:
         connection.send((True, "\n".join(page.extract_text() or "" for page in reader.pages)))
     except Exception as exc:
         try:
-            connection.send((False, f"{type(exc).__name__}: {exc}"))
+            connection.send((False, f"{type(exc).__name__}\0{exc}"))
         except (BrokenPipeError, EOFError, OSError):
             pass
     finally:

@@ -9,27 +9,51 @@ if [[ -z "$proxy_id" ]]; then
 fi
 config_container="${COMPOSE_PROJECT_NAME}-proxy-config-$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-proxy.XXXXXX")"
+mkdir "$work/new" "$work/old"
 cleanup() {
     docker rm -f "$config_container" >/dev/null 2>&1 || true
     rm -rf "$work"
 }
 trap cleanup EXIT
 
+restore_old() {
+    docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*'
+    docker cp "$work/old/." "$proxy_id:/etc/nginx/conf.d/"
+    docker exec "$proxy_id" nginx -t
+    docker exec "$proxy_id" nginx -s reload
+}
+
 compose build proxy
 compose run --detach --no-deps --name "$config_container" proxy >/dev/null
-docker cp "$config_container:/etc/nginx/conf.d/default.conf" "$work/new.conf"
-docker cp "$proxy_id:/etc/nginx/conf.d/default.conf" "$work/old.conf"
-docker cp "$work/new.conf" "$proxy_id:/etc/nginx/conf.d/default.conf"
+rendered=0
+for _ in {1..30}; do
+    if docker exec "$config_container" sh -c \
+        'test -s /etc/nginx/conf.d/default.conf && grep -q "limit_req_zone" /etc/nginx/conf.d/default.conf && ! grep -q "\${NGINX_" /etc/nginx/conf.d/default.conf' \
+        && docker exec "$config_container" nginx -t >/dev/null 2>&1; then
+        rendered=1
+        break
+    fi
+    sleep 1
+done
+if (( ! rendered )); then
+    echo "Rendered proxy configuration did not become valid" >&2
+    exit 1
+fi
+
+docker cp "$config_container:/etc/nginx/conf.d/." "$work/new/"
+docker cp "$proxy_id:/etc/nginx/conf.d/." "$work/old/"
+docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*'
+docker cp "$work/new/." "$proxy_id:/etc/nginx/conf.d/"
 if ! docker exec "$proxy_id" nginx -t; then
-    docker cp "$work/old.conf" "$proxy_id:/etc/nginx/conf.d/default.conf"
+    restore_old
     exit 1
 fi
 if ! docker exec "$proxy_id" nginx -s reload; then
-    docker cp "$work/old.conf" "$proxy_id:/etc/nginx/conf.d/default.conf"
-    docker exec "$proxy_id" nginx -s reload || true
+    restore_old
     exit 1
 fi
-if ! compose exec -T proxy wget -q -O /dev/null http://127.0.0.1/health; then
-    echo "Proxy health check failed after reloading the new configuration" >&2
+if ! compose exec -T proxy wget -q --header="Host: ${SIMPLE_WORD_DOMAIN:-localhost}" -O /dev/null http://127.0.0.1/health; then
+    echo "Proxy health check failed after reloading the new configuration; restoring previous config" >&2
+    restore_old
     exit 1
 fi

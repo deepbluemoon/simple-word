@@ -87,7 +87,9 @@ def extract_pdf_text(data: bytes) -> str:
         if not ok:
             if result == "page_limit":
                 raise HTTPException(status_code=400, detail="PDF exceeds 50-page limit")
-            raise ValueError(f"PDF parsing failed ({result})")
+            error_type, _, error_message = result.partition("\0")
+            logger.warning("PDF parsing failed (%s): %s", error_type, error_message)
+            raise ValueError(error_type)
         return result
     finally:
         if send:

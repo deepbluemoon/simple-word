@@ -58,7 +58,7 @@ export async function loadHealth(): Promise<{ model_versions: { version: string;
 }
 
 async function responseMessage(response: Response): Promise<string> {
-  if (response.status === 408) return 'PDF를 읽는 데 시간이 오래 걸렸어요. 더 작은 파일이나 단순한 PDF로 다시 시도해 주세요.'
+  if (response.status === 408) return '파일을 처리하는 데 시간이 오래 걸렸어요. 더 작은 파일로 다시 시도해 주세요.'
   if (response.status === 413) return '파일은 5MB 이하여야 해요.'
   if (response.status === 400) {
     const body = await response.clone().json().catch(() => ({})) as { detail?: string }
@@ -71,7 +71,7 @@ async function responseMessage(response: Response): Promise<string> {
   }
   if (response.status === 429) return '요청이 많아 잠시 기다리고 있어요. 조금 뒤 다시 시도해 주세요.'
   if (response.status === 500) return '문장을 바꾸지 못했어요. 잠시 뒤 다시 시도해 주세요.'
-  if (response.status === 503) return 'PDF를 처리할 수 없어요. 잠시 뒤 다시 시도해 주세요.'
+  if (response.status === 503) return '서비스가 잠시 바빠요. 잠시 뒤 다시 시도해 주세요.'
   return '요청을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.'
 }
 
