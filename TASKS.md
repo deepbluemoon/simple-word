@@ -17,7 +17,7 @@
 
 ### 현재 기준
 - **기준 시점**: 2026-11-20, `main`은 PR #51까지의 기능 작업이 반영됐고 최신 문서 진행 기록은 PR #52다.
-- **모델**: v2는 champion. Max가 시간순 분할을 고정하고 `v3-base`와 숫자·보존 용어 자리표시자 모델 `v3-ph`를 학습·평가 중이다. 현재 v3-base epoch 1 valid loss는 1.38(비교 기준 v2 최저 1.61)이며, 최종 게이트 전까지 champion을 바꾸지 않는다.
+- **모델**: champion은 v2이다. 평가셋 v2(200문장, 정답 2개, SHA-1 `8922190f`, `docs/EVAL_SET.md`)로 게이트를 다시 돌려 v2→v3-base가 PASS했다. v3-base는 **canary 후보(weight 0, `pending_canary`)로만** 등록했고, 클라우드 카나리·섀도 검증 전에는 champion을 바꾸지 않는다. v3-ph는 참고용이다(fallback은 가장 낮지만 어려운 용어 유지율이 높음, 조사 교정 #62).
 - **배포**: Lightsail 롤링 업데이트 로컬 검증 완료. 실제 Lightsail·GCP·Route 53 연결은 계정·도메인 준비 후 진행한다.
 - **데이터**: PR #51에서 두 부처 3,788개 문서, 20,768개 짝, 통과 13,176개까지 2년치 백필했다. 부처 추가는 미진행.
 
@@ -33,7 +33,7 @@
 | T8 | 업로드 웹 화면, Dockerfile·docker compose로 로컬 전체 실행 | Codex | done |
 | T9 (#5) | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS·GCP 감시 + 비용 | codex2 | done |
 | T10 (#6) | 로컬 배포 검증 후 Lightsail·GCP·Route 53 배포와 장애 조치 | codex2 + 사용자(계정·도메인) | doing (롤링 로컬 검증 완료, 클라우드 대기) |
-| T11 (#7) | 검수 평가셋 200건 준비·검수 | Claude Max + 사용자 | done (Claude 검수 193건; 사람 검수 아님) |
+| T11 (#7) | 검수 평가셋 200건 준비·검수 | Claude Max + 사용자 | done (v1: Claude 검수 193건 → v2: 200건·정답 2개, 적극적 쉬운 말(#69); 사람 검수 아님) |
 | T8b (#4) | 서비스 화면 Airtable 팔레트 | codex2 | done |
 | T12 (#8) | 셀프호스티드 러너, 수집·누적 학습 워크플로 | 총괄 + 사용자 | waiting user (러너 토큰) |
 | T13 (#28) | 긴 짝·여러 줄 제외 후 백필 데이터로 v2 학습, 시간순 평가와 게이트 검증 | Claude Max | done (v2 champion) |
@@ -41,5 +41,5 @@
 | T15 (#44) | 실행 이미지 다단계 빌드·런타임 파일 최소화, 모델 서빙 검증 | codex2 | done |
 | T16 (#50) | 어려운 용어 사전 검색 최적화 | Codex | done (부분 문자열 사전 검사) |
 | T17 (#51) | 행안부·복지부 과거 보도자료 백필 | Claude Max | done (3,788문서, 통과 짝 13,176) |
-| T18 | 자리표시자 포함 v3 모델 학습·INT8 평가·게이트 비교 | Claude Max | doing |
+| T18 | 자리표시자 포함 v3 모델 학습·INT8 평가·게이트 비교 | Claude Max | done (v3-base 선택, 평가셋 v2 게이트 PASS → canary 후보; champion v2 유지) |
 | T19 (#68) | 문서 보기 리뷰 수정·실제 API E2E 확인·nightly 재검증 | Codex | review |

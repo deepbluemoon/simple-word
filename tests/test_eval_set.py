@@ -70,7 +70,7 @@ def test_build_v2_references_and_rejects_copies(tmp_path):
             w.writerows(rows)
         return p
     out = tmp_path / "out.jsonl"
-    a = types.SimpleNamespace(v1=v1, candidates=cand, fill=fill, csv=write([["e002", "새 원문", "가", "나", ""], ["e001", "원문 하나", "다", "라", ""]]), out=out)
+    a = types.SimpleNamespace(v1=v1, candidates=cand, fill=fill, csv=write([["e002", "새 원문", "가", "나", ""], ["e001", "원문 하나", "다", "라", ""]]), out=out, expect=2)
     build_v2(a)
     got = [_json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
     assert [g["id"] for g in got] == ["e001", "e002"] and got[0]["references"] == ["다", "라"] and got[0]["ref_v1"] == "옛 정답"
@@ -78,3 +78,29 @@ def test_build_v2_references_and_rejects_copies(tmp_path):
     a.csv = write([["e001", "원문 하나", "원문 하나", "라", ""]])
     with pytest.raises(SystemExit):
         build_v2(a)
+
+    a.csv = write([["e001", "원문 하나", "다", "라", ""]])  # e002 빠짐
+    with pytest.raises(SystemExit, match="없는 id"):
+        build_v2(a)
+    a.csv = write([["e001", "원문 하나", "다", "라", ""], ["e001", "원문 하나", "다", "라", ""], ["e002", "새 원문", "가", "나", ""]])
+    with pytest.raises(SystemExit, match="두 번"):
+        build_v2(a)
+    a.csv, a.expect = write([["e001", "원문 하나", "다", "라", ""], ["e002", "새 원문", "가", "나", ""]]), 200
+    with pytest.raises(SystemExit, match="200건"):
+        build_v2(a)
+
+
+def test_fill_v2_errors_when_stratum_has_too_few_sentences(tmp_path, monkeypatch):
+    import json as _json, types
+    import pytest
+    from training import eval_set as E
+    monkeypatch.setattr(E, "nikl_dict", lambda d: {})
+    monkeypatch.setattr(E, "preserve_terms", lambda: [])
+    monkeypatch.setattr(E, "pool", lambda *a: [{"doc_id": "d", "idx": 0, "stratum": "general", "src": "충분히 긴 문장으로 끝나는 새 원문입니다.", "tgt": "t"}])
+    cand = tmp_path / "cand.jsonl"
+    cand.write_text("".join(_json.dumps({"id": i, "src": f"조각 {i}", "stratum": "general"}, ensure_ascii=False) + "\n" for i in ("e1", "e2")), encoding="utf-8")
+    v1 = tmp_path / "v1.jsonl"
+    v1.write_text("", encoding="utf-8")
+    a = types.SimpleNamespace(data_dir=tmp_path, pairs=None, splits=["x"], candidates=cand, v1=v1, out=tmp_path / "fill.jsonl")
+    with pytest.raises(SystemExit, match="2개인데"):
+        E.fill_v2(a)
