@@ -68,6 +68,9 @@ def test_failure_records_stage_and_stops(tmp_path):
     assert json.loads(ctx.state_path.read_text())["last_failure"]["stage"] == "teacher"
 
     ok = run_pipeline([Stage("collect", lambda ctx: None)], ctx_for(tmp_path))  # 성공하면 실패 기록 지움
+    history = [json.loads(l) for l in (tmp_path / "reports" / "pipeline_history.jsonl").read_text().splitlines()]
+    assert [h["status"] for h in history] == ["failed", "ok"]  # 같은 날 덮어써도 실행 기록은 남는다
+    assert "traceback" not in history[0]["stages"][1]
     assert ok["status"] == "ok" and "last_failure" not in json.loads(ctx.state_path.read_text())
 
 
@@ -206,3 +209,27 @@ def test_router_accepts_registry_with_candidate_block(tmp_path):
     router = ModelRouter(path)
     router.reload_if_changed()
     assert router.registry["champion"] == "dummy" and router.registry["canary_weight"] == 0
+
+
+def test_teacher_stage_uses_per_doc_policy(tmp_path, monkeypatch):
+    from training import pipeline, teacher
+    seen = {}
+    monkeypatch.setattr(teacher, "run", lambda data_dir, log=print, **kw: seen.update(kw) or 0)
+    ctx = pipeline.Context(tmp_path, tmp_path, tmp_path, tmp_path, today="2026-11-20", log=lambda m: None)
+    assert pipeline._teacher(ctx) == {"new_pairs": 0}
+    assert seen == {"per_doc": pipeline.TEACHER_PER_DOC, "recent_first": True}
+
+
+def test_check_stage_reruns_when_any_rule_file_changes(tmp_path, monkeypatch):
+    from training import pipeline
+    root = tmp_path / "repo"
+    for name in pipeline.CHECK_RULE_FILES:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("v1")
+    monkeypatch.setattr(pipeline, "ROOT", root)
+    ctx = pipeline.Context(tmp_path / "data", tmp_path, tmp_path, tmp_path, today="2026-11-20", log=lambda m: None)
+    ctx.data_dir.mkdir()
+    first = pipeline.check_rules_fingerprint(ctx)
+    assert set(first) == set(pipeline.CHECK_RULE_FILES) | {"nikl_terms.csv"}
+    (root / "simple_word/numbers.py").write_text("v2")
+    assert pipeline.check_rules_fingerprint(ctx) != first
