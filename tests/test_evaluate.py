@@ -36,9 +36,13 @@ def test_evaluate_scores_against_reference_and_records_diagnostics(tmp_path, mon
     monkeypatch.setattr(evaluation, "model_memory_mb", lambda *_args: 12.0)
     monkeypatch.setattr(evaluation, "nikl_dict", lambda *_args: {})
     monkeypatch.setattr(evaluation, "preserve_terms", lambda: [])
+    seen = []
+
     def fake_bert(groups):
-        assert set(groups) == {"output_ref", "output_source", "diagnostics_source_copy", "diagnostics_teacher"}
-        return {"output_ref": 0.82, "output_source": 0.91, "diagnostics_source_copy": 0.91, "diagnostics_teacher": 0.76}
+        # 진단(원문·교사)은 지연 측정 전에 따로, 모델 출력은 뒤에 따로 부른다
+        seen.append(set(groups))
+        values = {"output_ref": 0.82, "output_source": 0.91, "source_copy": 0.91, "teacher": 0.76}
+        return {k: values[k] for k in groups}
 
     monkeypatch.setattr(evaluation, "bert_score_groups", fake_bert)
     model_dir = tmp_path / "models" / "v"
@@ -61,6 +65,10 @@ def test_evaluate_scores_against_reference_and_records_diagnostics(tmp_path, mon
     assert metrics["diagnostics"]["teacher"]["bert_score_ref"] == 0.76
     assert metrics["diagnostics"]["teacher"]["count"] == 2
     assert "sari_morpheme" in metrics["diagnostics"]["source_copy"]
+    assert seen == [{"source_copy", "teacher"}, {"output_ref", "output_source"}]
+    assert json.loads((tmp_path / "report.json").read_text())["test"] == "data/eval/eval_set.jsonl"
+    evaluation.evaluate("v", eval_path, model_root=tmp_path / "models", data_dir=tmp_path / "data", out=tmp_path / "r2.json")
+    assert seen[2:] == [{"output_ref", "output_source"}]  # 같은 평가셋이면 진단은 캐시
 
 
 def test_bert_score_groups_unpacks_candidate_and_target_lists(monkeypatch):
@@ -71,3 +79,69 @@ def test_bert_score_groups_unpacks_candidate_and_target_lists(monkeypatch):
     from training.evaluate import bert_score_groups
     assert bert_score_groups({"model": (["a", "b"], ["x", "y"]), "teacher": (["c"], ["z"]), "empty": ([], [])}) == {
         "model": 0.6, "teacher": 0.9}
+
+
+def test_sari_multi_reference_matches_single_and_rewards_any_reference():
+    from training.evaluate import references, sari, sari_morpheme
+    src, out = "원문의 어려운 낱말을 씁니다.", "원문의 쉬운 말을 씁니다."
+    assert sari(src, out, "원문의 쉬운 말을 씁니다.") == sari(src, out, ["원문의 쉬운 말을 씁니다."])
+    other = "처음 글의 쉬운 말을 씁니다."
+    assert sari(src, out, [other, "원문의 쉬운 말을 씁니다."]) > sari(src, out, [other])
+    assert sari_morpheme(src, out, [other, out]) > sari_morpheme(src, out, [other])
+    assert references({"src": "a", "references": ["b", "c"]}) == ["b", "c"]
+    assert references({"src": "a", "ref": "b"}) == ["b"] and references({"src": "a", "tgt": "t"}) == ["t"]
+
+
+def test_bert_score_groups_takes_best_reference(monkeypatch):
+    import sys, types
+    seen = {}
+
+    def fake_score(c, r, **k):
+        seen["pairs"] = list(zip(c, r))
+        return None, None, types.SimpleNamespace(tolist=lambda: [0.2, 0.9, 0.5])
+    monkeypatch.setitem(sys.modules, "bert_score", types.SimpleNamespace(score=fake_score))
+    from training.evaluate import bert_score_groups
+    got = bert_score_groups({"model": (["o1", "o2"], [["r1", "r2"], "r3"])})
+    assert seen["pairs"] == [("o1", "r1"), ("o1", "r2"), ("o2", "r3")]
+    assert got == {"model": round((0.9 + 0.5) / 2, 4)}
+
+
+def test_references_rejects_bad_types_and_bert_groups_rejects_length_mismatch(monkeypatch):
+    import sys, types
+    import pytest
+    from training.evaluate import bert_score_groups, references
+    with pytest.raises(TypeError):
+        references({"id": "e1", "src": "a", "references": "글자로 쪼개지면 안 됨"})
+    with pytest.raises(ValueError):
+        references({"id": "e1", "src": "a", "references": []})
+    with pytest.raises(ValueError):
+        references({"id": "e1", "src": "a", "references": ["좋음", ""]})
+    with pytest.raises(ValueError):
+        references({"id": "e1", "src": "a"})
+    monkeypatch.setitem(sys.modules, "bert_score", types.SimpleNamespace(score=lambda c, r, **k: (None, None, None)))
+    with pytest.raises(ValueError):
+        bert_score_groups({"model": (["o1", "o2"], ["r1"])})
+
+
+def test_reference_diagnostics_cached_per_eval_set_sha(tmp_path, monkeypatch):
+    import hashlib
+    from training import evaluate as ev
+    path = tmp_path / "eval_set.jsonl"
+    rows = [{"id": "e1", "src": "어려운 원문입니다.", "references": ["쉬운 말입니다.", "쉬운 글입니다."], "teacher": "쉬운 말입니다."}]
+    path.write_text(json.dumps(rows[0], ensure_ascii=False) + "\n", encoding="utf-8")
+    sha = hashlib.sha1(path.read_bytes()).hexdigest()
+    calls = []
+    monkeypatch.setattr(ev, "bert_score_groups", lambda groups: calls.append(1) or {k: 0.5 for k in groups})
+    first = ev.reference_diagnostics(rows, path, sha)
+    second = ev.reference_diagnostics(rows, path, sha)
+    assert first == second and len(calls) == 1
+    assert first["source_copy"]["bert_score_ref"] == 0.5 and first["teacher"]["count"] == 1
+    assert ev.reference_diagnostics(rows, path, "0" * 40) and len(calls) == 2  # 다른 지문이면 다시 계산
+
+
+def test_display_path_is_relative_to_data_dir(tmp_path):
+    from training.evaluate import _display_path
+    data = tmp_path / "data"
+    (data / "eval").mkdir(parents=True)
+    assert _display_path(data / "eval" / "eval_set.jsonl", data) == "data/eval/eval_set.jsonl"
+    assert _display_path(tmp_path / "other.jsonl", data) == "other.jsonl"

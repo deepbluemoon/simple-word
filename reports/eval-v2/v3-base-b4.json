@@ -1,0 +1,41 @@
+{
+ "version": "v3-base-b4",
+ "test": "data/eval/eval_set.jsonl",
+ "metrics": {
+  "number_date_amount_match_rate": 1.0,
+  "preserved_terms_retention_rate": 1.0,
+  "difficult_term_retention_rate": 0.55,
+  "sentence_length_reduction_rate": -0.0018,
+  "sari": 0.4928,
+  "sari_morpheme": 0.4857,
+  "counts": {
+   "sentences": 200,
+   "preserved_terms": 40,
+   "difficult_terms": 20,
+   "difficult_terms_by_source": {
+    "국립국어원_15130006": 20
+   }
+  },
+  "bert_score_ref": 0.8421,
+  "bert_score_source": 0.823,
+  "fallback_rate": 0.16,
+  "cpu_p95_ms_per_sentence": 1244.3,
+  "model_memory_mb": 781.9,
+  "eval_model": "onnx_int8_cpu",
+  "test_set_sha1": "8922190fee493df3f292f4a49294dd7e97a25dd6",
+  "diagnostics": {
+   "source_copy": {
+    "count": 200,
+    "sari": 0.4428,
+    "sari_morpheme": 0.4604,
+    "bert_score_ref": 0.8397
+   },
+   "teacher": {
+    "count": 200,
+    "sari": 0.4648,
+    "sari_morpheme": 0.4606,
+    "bert_score_ref": 0.8295
+   }
+  }
+ }
+}

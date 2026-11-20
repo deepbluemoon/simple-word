@@ -75,6 +75,9 @@ def run_gate(champion_version: str | None, candidate_version: str, models_dir="m
     eval_set = data_dir / "eval" / "eval_set.jsonl"
     eval_set_sha1 = None
     evaluation_sets = {}
+    # 게이트 실행마다 따로 둔다(dummy→v2와 v2→v3가 같은 evaluations/v2.json을 덮어쓰지 않게).
+    run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{champion_version or 'none'}-vs-{candidate_version}"
+    run_dir = reports_dir / "evaluations" / run_id
     try:
         thresholds = json.loads(thresholds_path.read_text(encoding="utf-8"))
         if not eval_set.is_file():
@@ -85,9 +88,9 @@ def run_gate(champion_version: str | None, candidate_version: str, models_dir="m
         champion_metrics = {}
         if not first_champion:
             champion_metrics = evaluate_model(champion_version, eval_set, model_root=models_dir, data_dir=data_dir,
-                                              with_bert=True, out=reports_dir / "evaluations" / f"{champion_version}.json")
+                                              with_bert=True, out=run_dir / f"{champion_version}.json")
         candidate_metrics = evaluate_model(candidate_version, eval_set, model_root=models_dir, data_dir=data_dir,
-                                            with_bert=True, out=reports_dir / "evaluations" / f"{candidate_version}.json")
+                                            with_bert=True, out=run_dir / f"{candidate_version}.json")
         after_sha1 = hashlib.sha1(eval_set.read_bytes()).hexdigest()
         champion_sha1 = champion_metrics.get("test_set_sha1") if not first_champion else eval_set_sha1
         candidate_sha1 = candidate_metrics.get("test_set_sha1")
@@ -108,6 +111,7 @@ def run_gate(champion_version: str | None, candidate_version: str, models_dir="m
         "champion": champion_version,
         "candidate": candidate_version,
         "eval_set_sha1": eval_set_sha1,
+        "evaluations": f"evaluations/{run_id}",
         "evaluation_sets": evaluation_sets,
         "passed": not reasons,
         "reasons": reasons,
