@@ -133,6 +133,24 @@ def _law_get(target, query, key):
     return _get(url).decode("utf-8", errors="replace")
 
 
+def read_cache(path):
+    """law_cache.jsonl 읽기. 조회가 쓰다 멈춰 깨진 줄(보통 마지막 줄, 이어 쓴 뒤에는 중간에 남음)은 경고하고 건너뛴다.
+    그 (target, 용어)는 받은 것으로 치지 않으므로 다음 조회가 다시 받는다."""
+    import warnings
+
+    rows, broken = [], 0
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            broken += 1
+    if broken:
+        warnings.warn(f"{path}: 깨진 줄 {broken}개를 건너뜀")
+    return rows
+
+
 class LawFetchBusy(RuntimeError):
     """같은 캐시에 다른 조회가 이미 쓰고 있음."""
 
@@ -157,7 +175,9 @@ def fetch_law_terms(words, data_dir="data", key=None, targets=LAW_TARGETS, get=_
             fcntl.flock(out, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise LawFetchBusy(f"{cache}: 다른 법제처 조회가 이미 돌고 있다") from None
-        done = {(r["target"], r["query"]) for r in map(json.loads, filter(str.strip, cache.open(encoding="utf-8")))}
+        done = {(r["target"], r["query"]) for r in read_cache(cache)}
+        if cache.stat().st_size and not cache.read_bytes().endswith(b"\n"):
+            out.write("\n")  # 깨진 마지막 줄 뒤에 붙여 쓰지 않게
         for word in words:
             for target in targets:
                 if (target, word) in done:
@@ -193,7 +213,7 @@ def law_dict(data_dir="data", strict=False):
     strict: 법령용어→일상용어(lstrmRlt) 방향만, 그 법령용어가 일상용어로도 등록돼 있으면 빼고, 대안어는 한글만 남긴다."""
     data, parts, daily = Path(data_dir), [], set()
     cache = data / "law_cache.jsonl"
-    rows = list(map(json.loads, cache.open(encoding="utf-8"))) if cache.exists() else []
+    rows = read_cache(cache) if cache.exists() else []
     if strict:
         for r in rows:
             if r["target"] == "dlytrmRlt" and "dlytrmRltService" in r["xml"][:200]:

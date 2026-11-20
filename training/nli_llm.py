@@ -7,6 +7,7 @@ data/nli.jsonl의 표시된 줄에 "llm": {"verdict": "same"|"contradiction"|"om
 """
 import argparse
 import json
+import os
 import re
 import urllib.request
 
@@ -66,8 +67,10 @@ if __name__ == "__main__":
             done += 1
             if done % 25 == 0:
                 print(json.dumps({"judged": done}), flush=True)
-    with open(a.nli, "w", encoding="utf-8") as f:
+    tmp = f"{a.nli}.tmp"  # 쓰다가 멈춰도 원래 판정 파일이 반쯤 지워지지 않게
+    with open(tmp, "w", encoding="utf-8") as f:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    os.replace(tmp, a.nli)
     flagged = [r for r in rows if r.get("flag")]
     print(json.dumps({"flagged": len(flagged), "judged": done, "exclude": sum(bool(r.get("exclude")) for r in flagged),
                       "verdicts": {v: sum(r.get("llm", {}).get("verdict") == v for r in flagged) for v in VERDICTS + ("unknown",)}}))

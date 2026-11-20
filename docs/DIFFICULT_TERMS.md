@@ -6,7 +6,7 @@
 |---|---|---|---|
 | 국립국어원 공공언어 쓰기 평가용 용어 목록 (15130006) | CSV, 1,331행 | 공공누리 제1유형: 출처 표시 후 상업적 이용·변경 가능. 기존 사전이며 계속 사용 | [공공데이터포털](https://www.data.go.kr/data/15130006/fileData.do), 실행 시 `data/nikl_terms.csv`로 내려받음 |
 | 국립국어원 다듬은 말·우리말 다듬기 | HTML 목록 18,334건(기존 조사 기록); 2003년 합본 약 21,000개, 2004년 이후 자료 별도 누적 | 국립국어원 저작권 정책은 자료별 권리와 원 출처를 확인하도록 안내. 개별 항목의 상업적 이용·변경 허락이 확인되지 않아 제외 | [다듬은 말 검색](https://www.korean.go.kr/front/imprv/refineList.do?mn_id=158), [저작권 정책](https://www.korean.go.kr/front/page/pageView.do?page_id=P000508) |
-| 법제처 법령정보지식베이스 법령용어-일상용어 연계 (15111331) 및 역방향 (15111333) | XML Open API, 실시간. 전체 건수 미공개; 활용 신청/인증키 필요 | 공공데이터포털에 “이용허락범위 제한 없음” 표시. 채택. API에서 받은 연계 XML은 `data/law_terms.xml`에 두며 사전은 `data/` 원본을 읽음 | [법령→일상용어](https://www.data.go.kr/data/15111331/openapi.do), [일상용어→법령](https://www.data.go.kr/data/15111333/openapi.do), [API 안내](https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lstrmRltGuide) |
+| 법제처 법령정보지식베이스 법령용어-일상용어 연계 (15111331) 및 역방향 (15111333) | XML Open API, 실시간. 전체 건수 미공개; 활용 신청/인증키 필요 | 공공데이터포털에 “이용허락범위 제한 없음” 표시. 채택. 용어별 조회 응답은 `data/law_cache.jsonl`(보관 XML은 `data/law_terms.xml`)에 둔다. 기본 사전(`nikl_dict`)에는 넣지 않고 `--law raw|strict`로 옵트인할 때만 더한다 | [법령→일상용어](https://www.data.go.kr/data/15111331/openapi.do), [일상용어→법령](https://www.data.go.kr/data/15111333/openapi.do), [API 안내](https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lstrmRltGuide) |
 | 법제처 법령 정비용어 (15123435) | CSV, 21,735행 | 공공누리 제4유형: 상업적 이용·변경 금지. 제외 | [공공데이터포털](https://www.data.go.kr/data/15123435/fileData.do) |
 | 법제처 일상용어 (15123793) | CSV, 81,970행 | 공공누리 제4유형: 상업적 이용·변경 금지. 제외 | [공공데이터포털](https://www.data.go.kr/data/15123793/fileData.do) |
 | 공공용어 번역 정보 (15123639) | XLSX, 6,616행 | 공공누리 제1유형으로 이용 가능하지만 외국어 번역 대조표라 어려운 한국어-쉬운 한국어 짝이 아님. 목적에 맞지 않아 제외 | [공공데이터포털](https://www.data.go.kr/data/15123639/fileData.do) |
@@ -20,7 +20,7 @@
 
 학습 도구는 `{어려운 말: {"alternatives": [쉬운 말...], "sources": [출처...]}}`를 사용한다. 국립국어원 이표기는 같은 대안어를 가진 별도 검색어로 넣고, 같은 어려운 말의 대안어와 출처는 중복 없이 합친다. 유니코드 NFC와 앞뒤 공백·인용부호를 정리한다. 한 글자 용어와 `가능`, `내용`, `대상`, `사항`처럼 지나치게 일반적인 용어는 제외한다. 서빙 모듈은 바꾸지 않았다.
 
-국립국어원 원본은 기존처럼 자동으로 `data/nikl_terms.csv`에 받는다. 법제처 연계 응답은 `data/law_terms.xml`에 저장하면 로더가 함께 읽는다. 원본 자료는 `.gitignore` 대상이며 커밋하지 않는다. 법제처 API는 `OC` 인증값을 요구하고 전체 용어 일괄 다운로드 경로/전체 건수를 공개하지 않아, 등록한 API 활용 범위에 따라 연계 응답을 보관해야 한다.
+국립국어원 원본은 기존처럼 자동으로 `data/nikl_terms.csv`에 받는다. 법제처 연계 응답은 `fetch_law_terms`가 `data/law_cache.jsonl`에 쌓는다(보관용 `data/law_terms.xml`도 읽는다). 하지만 교사·검사·평가가 쓰는 기본 사전에는 들어가지 않는다. `python -m training.terms --law raw|strict`처럼 명시할 때만 측정에 더한다. 원본 자료는 `.gitignore` 대상이며 커밋하지 않는다. 법제처 API는 `OC` 인증값을 요구하고 전체 용어 일괄 다운로드 경로/전체 건수를 공개하지 않아, 등록한 API 활용 범위에 따라 연계 응답을 보관해야 한다.
 
 ## 데이터 적용 범위
 

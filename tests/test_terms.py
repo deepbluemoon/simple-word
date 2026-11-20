@@ -128,3 +128,23 @@ def test_fetch_law_terms_refuses_concurrent_run(tmp_path, monkeypatch):
         with pytest.raises(terms.LawFetchBusy):
             terms.fetch_law_terms(["제고"], tmp_path, key="k", targets=("lstrmRlt",), get=lambda *a: "<x/>", delay=0, log=lambda m: None)
     assert terms.fetch_law_terms(["제고"], tmp_path, key="k", targets=("lstrmRlt",), get=lambda *a: "<x/>", delay=0, log=lambda m: None) == 1
+
+
+def test_law_cache_skips_broken_last_line(tmp_path):
+    import json
+    import pytest
+    from training import terms
+    good = json.dumps({"target": "lstrmRlt", "query": "제고", "xml": "<x/>"}, ensure_ascii=False)
+    (tmp_path / "law_cache.jsonl").write_text(good + "\n" + '{"target": "lstrmRlt", "que', encoding="utf-8")
+    assert [r["query"] for r in terms.read_cache(tmp_path / "law_cache.jsonl")] == ["제고"]
+    assert terms.fetch_law_terms(["제고"], tmp_path, key="k", targets=("lstrmRlt",), get=lambda *a: "<x/>", delay=0, log=lambda m: None) == 0
+    (tmp_path / "mid.jsonl").write_text('{"broken\n' + good + "\n", encoding="utf-8")
+    with pytest.warns(UserWarning, match="깨진 줄 1개"):
+        assert [r["query"] for r in terms.read_cache(tmp_path / "mid.jsonl")] == ["제고"]
+
+
+def test_fetch_after_broken_last_line_starts_new_line(tmp_path):
+    from training import terms
+    (tmp_path / "law_cache.jsonl").write_text('{"target": "lstrmRlt", "que', encoding="utf-8")
+    assert terms.fetch_law_terms(["제고"], tmp_path, key="k", targets=("lstrmRlt",), get=lambda *a: "<x/>", delay=0, log=lambda m: None) == 1
+    assert [r["query"] for r in terms.read_cache(tmp_path / "law_cache.jsonl")] == ["제고"]
