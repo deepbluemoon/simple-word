@@ -4,9 +4,11 @@ import { ApiError, sendFeedback, simplify } from '@/api/simpleWord'
 import C5VerdictBadge from '@/components/common/C5VerdictBadge.vue'
 import C11ModelServerState from '@/components/common/C11ModelServerState.vue'
 import S5FeedbackPanel from '@/views/S5FeedbackPanel.vue'
+import S4Result from '@/views/S4Result.vue'
+import { getFeedbackVote } from '@/stores/feedbackVotes'
 import { findResult, readHistory, saveResult } from '@/stores/history'
 import { diffWords } from '@/lib/textDiff'
-import { groupParagraphs, readReaderSize, saveReaderSize } from '@/lib/reader'
+import { groupParagraphs, groupSentenceParagraphs, readReaderSize, saveReaderSize } from '@/lib/reader'
 
 let storage: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void; clear: () => void }
 beforeEach(() => {
@@ -78,10 +80,16 @@ describe('result display and local history', () => {
 
   it('shows feedback confirmation as a persistent live status after voting', async () => {
     vi.spyOn(await import('@/api/simpleWord'), 'sendFeedback').mockResolvedValue(undefined)
-    const wrapper = mount(S5FeedbackPanel, { props: { modelVersion: 'v1', original: '원문', simple: '쉬운 말' } })
+    const props = { resultId: 'feedback-test', sentenceIndex: 1, modelVersion: 'v1', original: '원문', simple: '쉬운 말' }
+    const wrapper = mount(S5FeedbackPanel, { props })
     await wrapper.get('button').trigger('click')
     expect(wrapper.get('[role="status"]').text()).toBe('의견 감사합니다.')
     expect(wrapper.get('button').attributes('aria-pressed')).toBe('true')
+    expect(getFeedbackVote(props.resultId, props.sentenceIndex)).toBe('up')
+    expect(wrapper.findAll('button')[1].attributes('disabled')).toBeDefined()
+    const remounted = mount(S5FeedbackPanel, { props })
+    expect(remounted.get('button').attributes('aria-pressed')).toBe('true')
+    expect(remounted.get('button').attributes('disabled')).toBeDefined()
   })
 
   it('keeps recent results in local storage and restores an individual result', () => {
@@ -102,11 +110,29 @@ describe('result display and local history', () => {
   it('groups easy sentences by paragraph and stores the three-step reader size', () => {
     const sentences = [
       { original: 'A', simple: '가', fallback: false, paragraph_id: 0 },
-      { original: 'B', simple: '나', fallback: false, paragraph_id: 0 },
+      { original: 'B', simple: '나', fallback: true, paragraph_id: 0 },
       { original: 'C', simple: '다', fallback: false, paragraph_id: 1 },
     ]
-    expect(groupParagraphs(sentences)).toEqual(['가 나', '다'])
+    expect(groupParagraphs(sentences)).toEqual(['가 B', '다'])
+    expect(groupSentenceParagraphs(sentences).map((paragraph) => paragraph.length)).toEqual([2, 1])
     saveReaderSize('large')
     expect(readReaderSize()).toBe('large')
+  })
+
+  it('opens the continuous document first and reveals selected sentence notes by keyboard', async () => {
+    saveResult({
+      id: 'doc-view', filename: '안내.txt', model_version: 'v1', created_at: '2026-11-19T00:00:00Z',
+      sentences: [
+        { original: '신청서를 제출해야 합니다.', simple: '신청서를 내야 합니다.', fallback: false, paragraph_id: 0 },
+        { original: '수수료는 400원입니다.', simple: '수수료는 400원입니다.', fallback: true, fallback_reason: 'numbers', paragraph_id: 1 },
+      ],
+    })
+    const wrapper = mount(S4Result, { props: { id: 'doc-view' }, global: { stubs: { C1Rail: true, RouterLink: true } } })
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('문서 보기')
+    expect(wrapper.get('.document-paragraph').text()).toContain('신청서를 바뀐 부분: 내야 합니다.')
+    expect(wrapper.find('.document-sentence').element.tagName).toBe('SPAN')
+    expect(wrapper.get('.document-sentence mark').text()).toContain('바뀐 부분: 내야')
+    await wrapper.findAll('.document-sentence')[1].trigger('keydown.enter')
+    expect(wrapper.get('.clause-note').text()).toContain('숫자나 날짜를 안전하게 지키려고 원문을 유지했어요.')
   })
 })

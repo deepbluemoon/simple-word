@@ -42,3 +42,4 @@
 | T16 (#50) | 어려운 용어 사전 검색 최적화 | Codex | done (부분 문자열 사전 검사) |
 | T17 (#51) | 행안부·복지부 과거 보도자료 백필 | Claude Max | done (3,788문서, 통과 짝 13,176) |
 | T18 | 자리표시자 포함 v3 모델 학습·INT8 평가·게이트 비교 | Claude Max | doing |
+| T19 (#68) | 문서 보기 리뷰 수정·실제 API E2E 확인·nightly 재검증 | Codex | review |

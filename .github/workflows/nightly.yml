@@ -14,6 +14,12 @@ jobs:
       MODEL_DIR: ${{ github.workspace }}/.tmp/simpleword-e2e-models
       IMAGE: simple-word:e2e
       PROXY_IMAGE: simple-word-proxy:e2e
+      MAX_CONCURRENT_SIMPLIFY: "100"
+      NGINX_SIMPLIFY_RATE: "1000r/s"
+      NGINX_SIMPLIFY_BURST: "1000"
+      NGINX_FEEDBACK_RATE: "1000r/s"
+      NGINX_FEEDBACK_BURST: "1000"
+      NGINX_CONNECTIONS_PER_IP: "1000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -115,38 +121,3 @@ jobs:
           trap cleanup EXIT
           env -u NGINX_SIMPLIFY_RATE -u NGINX_SIMPLIFY_BURST -u NGINX_FEEDBACK_RATE -u NGINX_FEEDBACK_BURST -u NGINX_CONNECTIONS_PER_IP "${compose[@]}" up -d --build --wait --wait-timeout 180 api-1 api-2 proxy
           python scripts/load.py --url http://127.0.0.1:18017/simplify --requests 20 --concurrency 10 --min-429-rate 0.1
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      HOST_PORT: "8000"
-      MODEL_DIR: ${{ github.workspace }}/.tmp/nightly-e2e/models
-      MAX_CONCURRENT_SIMPLIFY: "100"
-      NGINX_SIMPLIFY_RATE: "1000r/s"
-      NGINX_SIMPLIFY_BURST: "1000"
-      NGINX_FEEDBACK_RATE: "1000r/s"
-      NGINX_FEEDBACK_BURST: "1000"
-      NGINX_CONNECTIONS_PER_IP: "1000"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Start API and proxy
-        run: |
-          mkdir -p "$MODEL_DIR"
-          docker compose -p "simpleword-e2e-${GITHUB_RUN_ID}" -f deploy/compose.yaml up -d --build --wait --wait-timeout 180 api-1 api-2 proxy
-      - run: npm ci
-        working-directory: frontend
-      - run: npx playwright install --with-deps chromium
-        working-directory: frontend
-      - run: npm run e2e
-        working-directory: frontend
-      - name: Stop API and proxy
-        if: always()
-        run: docker compose -p "simpleword-e2e-${GITHUB_RUN_ID}" -f deploy/compose.yaml down -v --remove-orphans
