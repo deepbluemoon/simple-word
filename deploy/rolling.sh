@@ -7,6 +7,10 @@ if [[ -z "$IMAGE" ]]; then
     echo "Usage: $0 <image:tag>" >&2
     exit 2
 fi
+if [[ -z "${EXPECTED_MODEL_VERSION:-}" ]]; then
+    echo "EXPECTED_MODEL_VERSION is required for the deployment smoke check" >&2
+    exit 2
+fi
 previous1="$(compose ps --all --quiet api-1 | xargs -r docker inspect --format '{{.Config.Image}}' 2>/dev/null || true)"
 previous2="$(compose ps --all --quiet api-2 | xargs -r docker inspect --format '{{.Config.Image}}' 2>/dev/null || true)"
 if [[ -z "$previous1" || -z "$previous2" ]]; then

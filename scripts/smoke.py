@@ -17,12 +17,14 @@ SAMPLE_SENTENCES = (
 )
 
 
-def validate(health, result):
+def validate(health, result, expected_model_version=None):
     versions = health.get("model_versions") if isinstance(health, dict) else None
     if not isinstance(versions, list) or not any(isinstance(item, dict) and item.get("version") for item in versions):
         raise ValueError("/health did not report a model version")
     if not isinstance(result, dict) or not isinstance(result.get("model_version"), str) or not result["model_version"]:
         raise ValueError("/simplify did not report a model version")
+    if expected_model_version and result["model_version"] != expected_model_version:
+        raise ValueError(f"expected model {expected_model_version}, got {result['model_version']}")
     sentences = result.get("sentences")
     if not isinstance(sentences, list) or len(sentences) != len(SAMPLE_SENTENCES):
         raise ValueError(f"expected {len(SAMPLE_SENTENCES)} simplified sentences")
@@ -56,13 +58,14 @@ def upload_url(base, timeout=5):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("address", help="deployed base URL, such as https://api.example.com")
+    parser.add_argument("--expected-model-version")
     args = parser.parse_args(argv)
     base = args.address.rstrip("/")
     deadline = time.monotonic() + 5
     try:
         health = read_json(urllib.request.Request(f"{base}/health"), max(0.1, deadline - time.monotonic()))
         result = upload_url(base, max(0.1, deadline - time.monotonic()))
-        validate(health, result)
+        validate(health, result, args.expected_model_version)
         if time.monotonic() > deadline:
             raise TimeoutError("smoke check exceeded 5 seconds")
     except Exception as error:

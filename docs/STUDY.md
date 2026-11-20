@@ -55,7 +55,7 @@
 ## 8. 테스트 층
 - **단위 테스트**: `pytest`로 숫자 보존, 라우팅, 입력 검증처럼 코드 한 부분을 빠르게 확인한다.
 - **통합 테스트**: `scripts/integration.py`가 별도 Compose 프로젝트를 띄워 업로드·피드백·동시 요청 제한·레지스트리 교체를 함께 확인한다.
-- **배포·nightly 검증**: 매일 실행하는 `.github/workflows/nightly.yml`이 통합 테스트, `deploy/test-local.sh`의 실제 컨테이너 롤링·복구, 서비스 기동 후 스모크 및 부하 검사를 차례로 실행한다.
+- **배포 검증**: PR에서는 배포 스크립트와 API·모델 코드가 바뀔 때만 `.github/workflows/ci.yml`의 배포 검증 job이 돈다. 실제 배포에서는 새 이미지와 모델 버전으로 카나리 직전, Lightsail 롤링 직전에 `deploy/test-local.sh`가 무중단 롤링·실패 복구와 smoke를 확인한다. 예약 검증은 하지 않는다.
 - **스모크 테스트**: 배포 직후 `scripts/smoke.py <주소>`로 health와 모델 버전, 숫자 보존, 문장 수, fallback 응답을 빠르게 확인한다.
 - **부하 테스트**: `scripts/load.py`가 동시 요청의 응답 시간 분포와 429 비율을 출력하고, 기준 옵션이 주어지면 초과 시 실패한다.
 - **브라우저 E2E**: Playwright가 실제 브라우저에서 업로드부터 결과 표시까지 화면과 API 연결을 검증한다. `.github/workflows/ci.yml`은 프런트엔드 단위 테스트·빌드를 돌리고, 브라우저 E2E는 `frontend`의 `npm run e2e`로 별도 실행한다. E2E와 backend nightly는 서로 다른 경로를 확인한다.

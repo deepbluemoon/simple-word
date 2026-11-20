@@ -5,15 +5,52 @@ REPO_ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 DEPLOY_DIR="$REPO_ROOT/deploy"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-rolling.XXXXXX")"
 COMPOSE_PROJECT_NAME="rolling-test-${$}"
-GOOD_IMAGE="${IMAGE:-simple-word:qa-codex}"
+GOOD_IMAGE="${1:-${IMAGE:-simple-word:qa-codex}}"
+MODEL_SOURCE="${2:-}"
+MODEL_VERSION="${3:-qa-dummy}"
 IMAGE_PROVIDED=0
-[[ -n "${IMAGE:-}" ]] && IMAGE_PROVIDED=1
+[[ -n "${1:-${IMAGE:-}}" ]] && IMAGE_PROVIDED=1
 BROKEN_IMAGE="simple-word:qa-broken-${$}"
 PROXY_IMAGE="simple-word-proxy:qa-${$}"
 HOST_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 mkdir -p "$WORK_DIR/models"
+if [[ -n "$MODEL_SOURCE" ]]; then
+    if [[ -z "${3:-}" || ! -d "$MODEL_SOURCE/$MODEL_VERSION" || ! -f "$MODEL_SOURCE/registry.json" ]]; then
+        echo "Usage: $0 <image:tag> <model-dir> <model-version>" >&2
+        exit 2
+    fi
+    python3 - "$MODEL_SOURCE" "$WORK_DIR/models" "$MODEL_VERSION" <<'PY'
+import json
+from pathlib import Path
+import shutil
+import sys
+
+source, target = map(Path, sys.argv[1:3])
+expected = sys.argv[3]
+registry_path = source / "registry.json"
+registry = json.loads(registry_path.read_text(encoding="utf-8"))
+if registry.get("champion") != expected:
+    raise SystemExit(f"Expected champion {expected}, got {registry.get('champion')}")
+weight = registry.get("canary_weight", 0)
+if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not 0 <= weight <= 1:
+    raise SystemExit("Invalid canary_weight in registry.json")
+for version in {registry.get("champion"), registry.get("canary"), registry.get("shadow")} - {None, "dummy"}:
+    if not isinstance(version, str) or version in {"", ".", ".."} or "/" in version or "\\" in version:
+        raise SystemExit("Invalid model version in registry.json")
+    artifact = source / version
+    if not artifact.is_dir() or not ((artifact / "metadata.json").is_file() or (artifact / "encoder.onnx").is_file()):
+        raise SystemExit(f"Missing model artifact for {version}")
+    shutil.copytree(artifact, target / version)
+shutil.copy2(registry_path, target / "registry.json")
+PY
+else
+    mkdir -p "$WORK_DIR/models/$MODEL_VERSION"
+    printf '{"champion":"%s","canary":null,"canary_weight":0,"shadow":null}\n' "$MODEL_VERSION" > "$WORK_DIR/models/registry.json"
+    printf '{"version":"%s"}\n' "$MODEL_VERSION" > "$WORK_DIR/models/$MODEL_VERSION/metadata.json"
+fi
 export COMPOSE_PROJECT_NAME HOST_PORT DEPLOY_HOST=127.0.0.1 MODEL_DIR="$WORK_DIR/models"
 export DEPLOY_STATE_FILE="$WORK_DIR/previous-tag" PROXY_IMAGE
+export EXPECTED_MODEL_VERSION="$MODEL_VERSION"
 export NGINX_SIMPLIFY_RATE=1000r/s NGINX_SIMPLIFY_BURST=1000
 export NGINX_FEEDBACK_RATE=1000r/s NGINX_FEEDBACK_BURST=1000 NGINX_CONNECTIONS_PER_IP=1000
 unset DEPLOY_USER DOCKER_HOST WEIGHT_HOOK WEIGHT_HOOK_WAIT
@@ -31,7 +68,7 @@ if (( IMAGE_PROVIDED )); then docker image inspect "$GOOD_IMAGE" >/dev/null 2>&1
 export IMAGE="$GOOD_IMAGE"
 compose build proxy
 IMAGE="$GOOD_IMAGE" compose up -d --no-build --wait --wait-timeout 180 api-1 api-2 proxy
-python3 "$REPO_ROOT/scripts/smoke.py" "http://127.0.0.1:$HOST_PORT"
+python3 "$REPO_ROOT/scripts/smoke.py" "http://127.0.0.1:$HOST_PORT" --expected-model-version "$MODEL_VERSION"
 
 cat > "$WORK_DIR/Dockerfile.broken" <<EOF
 FROM $GOOD_IMAGE
