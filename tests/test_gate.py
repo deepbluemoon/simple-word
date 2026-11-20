@@ -2,8 +2,9 @@ import hashlib
 import json
 from pathlib import Path
 
-from gate.gate import run_gate
+from gate.gate import evaluate, run_gate
 from gate.parity import check_parity
+import gate.parity as parity_module
 import training.evaluate as training_evaluate
 
 
@@ -48,6 +49,32 @@ def test_parity_reports_exact_match_and_mismatch(tmp_path):
 
     assert check_parity("ok", tmp_path) == []
     assert "expected" in check_parity("bad", tmp_path)[0]
+
+
+def test_parity_reports_missing_load_failure_and_invalid_records(tmp_path, monkeypatch):
+    assert "Missing" in check_parity("missing", tmp_path)[0]
+
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "parity.jsonl").write_text('{"input":"x","output":"x"}\n')
+    monkeypatch.setattr(parity_module, "Simplifier", lambda _: (_ for _ in ()).throw(RuntimeError("bad model")))
+    assert "Could not load model" in check_parity("broken", tmp_path)[0]
+
+    invalid = tmp_path / "invalid"
+    invalid.mkdir()
+    (invalid / "parity.jsonl").write_text('not json\n{"input":3,"output":"x"}\n{}\n')
+
+    class Identity:
+        def simplify(self, inputs): return inputs
+
+    monkeypatch.setattr(parity_module, "Simplifier", lambda _: Identity())
+    errors = check_parity("invalid", tmp_path)
+    assert any("invalid parity record" in error for error in errors)
+    assert "parity.jsonl has no valid records" in errors
+
+
+def test_evaluate_rejects_non_object_metrics():
+    assert evaluate({"metrics": None}, {"metrics": {}}, {}) == (["evaluation metrics must be objects"], [])
 
 
 def test_gate_records_pass_report_and_history(tmp_path, monkeypatch):

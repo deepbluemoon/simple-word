@@ -18,5 +18,14 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['tests/unit/**/*.spec.ts'],
     globals: false,
+    coverage: {
+      provider: 'v8',
+      include: ['src/lib/**', 'src/stores/**', 'src/api/**', 'src/components/**', 'src/views/**'],
+      thresholds: {
+        'src/lib/**': { lines: 80 },
+        'src/stores/**': { lines: 80 },
+        'src/api/**': { lines: 80 },
+      },
+    },
   },
 })

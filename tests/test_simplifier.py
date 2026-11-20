@@ -1,4 +1,7 @@
+import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,6 +10,47 @@ from simple_word.model import Simplifier
 
 def test_simplifier_is_dummy_without_model(tmp_path):
     assert Simplifier(str(tmp_path)).simplify(["가 나", "다"]) == ["가 나", "다"]
+
+
+def test_onnx_path_loads_runtime_and_restores_required_placeholder(tmp_path, monkeypatch):
+    import numpy as np
+
+    artifact = tmp_path / "model"
+    artifact.mkdir()
+    (artifact / "encoder.onnx").touch()
+    (artifact / "metadata.json").write_text(json.dumps({"decoding": {"force_placeholders": True}}))
+
+    class Tokenizer:
+        def no_padding(self): pass
+        def no_truncation(self): pass
+        def token_to_id(self, token): return 7 if token == "<N0>" else None
+        def encode(self, text, add_special_tokens=False): return SimpleNamespace(ids=[2])
+        def decode(self, ids, skip_special_tokens=True): return "지원금 <N0> 원을 신청합니다."
+
+    class Encoder:
+        def get_outputs(self): return [SimpleNamespace(name="cross_0")]
+        def run(self, _, feed): return [np.zeros((1, 2, 1, 3), dtype=np.float32)]
+
+    class Decoder:
+        def __init__(self): self.calls = 0
+        def get_inputs(self): return [SimpleNamespace(name="past_key")]
+        def run(self, _, feed):
+            assert "cross_0" in feed and "past_key" in feed
+            logits = np.full((1, 1, 8), -1.0)
+            logits[0, 0, 7 if self.calls == 0 else 1] = 1.0
+            self.calls += 1
+            return logits, np.zeros((1, 2, 1, 3), dtype=np.float32)
+
+    encoder, decoder = Encoder(), Decoder()
+    runtime = SimpleNamespace(SessionOptions=lambda: SimpleNamespace(), InferenceSession=lambda path, *_args, **_kwargs: decoder if path.endswith("decoder.onnx") else encoder)
+    tokenizer = SimpleNamespace(from_file=lambda _: Tokenizer())
+    monkeypatch.setitem(sys.modules, "onnxruntime", runtime)
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=tokenizer))
+
+    simp = Simplifier(str(artifact))
+
+    assert simp.simplify_explained(["지원금 3억 원을 신청합니다."]) == [("지원금 3억 원을 신청합니다.", False, None)]
+    assert decoder.calls == 2
 
 
 def test_onnx_greedy_matches_torch_greedy(tmp_path):
