@@ -60,17 +60,21 @@ def stop_epoch(valid_losses, patience=2):
     return len(valid_losses) - 1 - best >= patience, best + 1
 
 
-def make_splits(pairs_paths, out_dir, by="hash", published=None):
-    rows = []
+def make_splits(pairs_paths, out_dir, by="hash", published=None, exclude=None):
+    """exclude: train에서만 뺄 (doc_id, idx) 집합(training.nli 뜻 검사). valid/test는 그대로 두어 이전 버전과 비교한다."""
+    rows, exclude = [], exclude or set()
     for path in pairs_paths:
         for line in Path(path).open(encoding="utf-8"):
             p = json.loads(line)
             if p.get("passed") and p.get("tgt"):
-                rows.append({"doc_id": p["doc_id"], "src": p["src"], "tgt": p["tgt"]})
+                rows.append({"doc_id": p["doc_id"], "src": p["src"], "tgt": p["tgt"], "_key": (p["doc_id"], p.get("idx"))})
     owner = time_split_of(rows, published or {}) if by == "time" else {r["doc_id"]: split_of(r["doc_id"]) for r in rows}
     splits = {"train": [], "valid": [], "test": []}
     for r in rows:
-        splits[owner[r["doc_id"]]].append(r)
+        part = owner[r["doc_id"]]
+        if not (part == "train" and r.pop("_key") in exclude):
+            r.pop("_key", None)
+            splits[part].append(r)
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, rows in splits.items():
         (out_dir / f"{name}.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
@@ -136,12 +140,16 @@ def init_placeholder_embeddings(tok, model):
 
 
 def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", model_root="models", split="hash", docs=None,
-          eval_set=None, patience=2, placeholders=False):
+          eval_set=None, patience=2, placeholders=False, nli=None):
     published = {}
     if docs:
         published = {d["id"]: d["published_at"] for d in map(json.loads, Path(docs).open(encoding="utf-8"))}
     snapshot = Path(data_root) / version
-    splits = make_splits(pairs_paths, snapshot, split, published)
+    nli_flags = None
+    if nli:
+        from training.nli import load_flags
+        nli_flags = load_flags(nli)
+    splits = make_splits(pairs_paths, snapshot, split, published, nli_flags)
     if not splits["train"]:
         raise ValueError(f"train 분할이 비었다: passed=true 짝이 없음 ({pairs_paths})")
     eval_texts = [json.loads(l)["src"] for l in Path(eval_set).open(encoding="utf-8")] if eval_set else []
@@ -200,7 +208,7 @@ def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", mo
     tok.save_pretrained(out)
     metrics = {"base_model": BASE, "data_snapshot": str(snapshot), "device": device, "seed": SEED, "epochs": epochs,
                "lr": lr, "batch": batch, "train_seconds": round(time.time() - t0, 1),
-               "best_epoch": best_epoch, "patience": patience, "split": split, "sizes": {k: len(v) for k, v in splits.items()}, "leakage": leaks, "audit": audited, "history": history,
+               "best_epoch": best_epoch, "patience": patience, "split": split, "sizes": {k: len(v) for k, v in splits.items()}, "leakage": leaks, "audit": audited, "nli": {"path": str(nli), "flagged": len(nli_flags)} if nli else None, "history": history,
                "placeholders": ph_info, "eval_set": str(eval_set) if eval_set else None}
     (out / "train_metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=1), encoding="utf-8")
     return metrics
@@ -218,13 +226,15 @@ if __name__ == "__main__":
     ap.add_argument("--eval-set", help="사람 검수 평가셋 jsonl(src 필드) — train과 겹치면 학습 거부")
     ap.add_argument("--check-leakage", action="store_true", help="학습하지 않고 분할·누수 건수만 출력")
     ap.add_argument("--placeholders", action="store_true", help="숫자·보존 용어를 자리표시자로 바꿔 학습(v3)")
+    ap.add_argument("--nli", help="training.nli 판정 결과(data/nli.jsonl) — flag가 있는 짝을 train에서 뺀다")
     a = ap.parse_args()
     if a.check_leakage:
         pub = {d["id"]: d["published_at"] for d in map(json.loads, open(a.docs, encoding="utf-8"))} if a.docs else {}
-        sp = make_splits(a.pairs, Path("data") / a.version, a.split, pub)
+        from training.nli import load_flags
+        sp = make_splits(a.pairs, Path("data") / a.version, a.split, pub, load_flags(a.nli) if a.nli else None)
         ev = [json.loads(l)["src"] for l in open(a.eval_set, encoding="utf-8")] if a.eval_set else []
         print(json.dumps({"sizes": {k: len(v) for k, v in sp.items()}, "leakage": leakage(sp, ev), "audit": audit(sp)}, ensure_ascii=False))
     else:
         print(json.dumps(train(a.version, a.pairs, a.epochs, a.lr, a.batch, split=a.split, docs=a.docs, eval_set=a.eval_set,
-                               placeholders=a.placeholders),
+                               placeholders=a.placeholders, nli=a.nli),
                          ensure_ascii=False))
