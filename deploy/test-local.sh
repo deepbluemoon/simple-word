@@ -12,6 +12,8 @@ HOST_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 
 mkdir -p "$WORK_DIR/models"
 export COMPOSE_PROJECT_NAME HOST_PORT DEPLOY_HOST=127.0.0.1 MODEL_DIR="$WORK_DIR/models"
 export DEPLOY_STATE_FILE="$WORK_DIR/previous-tag" PROXY_IMAGE
+export NGINX_SIMPLIFY_RATE=1000r/s NGINX_SIMPLIFY_BURST=1000
+export NGINX_FEEDBACK_RATE=1000r/s NGINX_FEEDBACK_BURST=1000 NGINX_CONNECTIONS_PER_IP=1000
 unset DEPLOY_USER DOCKER_HOST WEIGHT_HOOK WEIGHT_HOOK_WAIT
 
 compose() { docker compose --project-name "$COMPOSE_PROJECT_NAME" --file "$DEPLOY_DIR/compose.yaml" "$@"; }

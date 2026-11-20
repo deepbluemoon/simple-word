@@ -1,5 +1,9 @@
 resolver 127.0.0.11 ipv6=off valid=5s;
 
+limit_req_zone $binary_remote_addr zone=simplify_per_ip:10m rate=${NGINX_SIMPLIFY_RATE};
+limit_req_zone $binary_remote_addr zone=feedback_per_ip:10m rate=${NGINX_FEEDBACK_RATE};
+limit_conn_zone $binary_remote_addr zone=connections_per_ip:10m;
+
 upstream api_backend {
     zone api_backend 64k;
     server api-1:8000 resolve max_fails=2 fail_timeout=5s;
@@ -8,11 +12,46 @@ upstream api_backend {
 
 server {
     listen 80;
+    server_tokens off;
+    client_max_body_size 6m;
+    client_body_timeout 15s;
+    send_timeout 30s;
+    limit_conn connections_per_ip ${NGINX_CONNECTIONS_PER_IP};
+
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; connect-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    location = /simplify {
+        limit_req zone=simplify_per_ip burst=${NGINX_SIMPLIFY_BURST} nodelay;
+        limit_req_status 429;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_next_upstream_tries 2;
+        proxy_pass http://api_backend;
+    }
+
+    location = /feedback {
+        limit_req zone=feedback_per_ip burst=${NGINX_FEEDBACK_BURST} nodelay;
+        limit_req_status 429;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_next_upstream_tries 2;
+        proxy_pass http://api_backend;
+    }
 
     location / {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
         proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_next_upstream_tries 2;
         proxy_pass http://api_backend;
