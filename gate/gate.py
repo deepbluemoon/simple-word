@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,10 +8,10 @@ from gate.parity import check_parity
 
 
 def evaluate(champion: dict, candidate: dict, thresholds: dict, first_champion=False) -> tuple[list[str], list[dict]]:
-    old = champion.get("metrics", {})
-    new = candidate.get("metrics", {})
+    old = champion.get("metrics", champion)
+    new = candidate.get("metrics", candidate)
     if not isinstance(old, dict) or not isinstance(new, dict):
-        return ["metadata metrics must be objects"], []
+        return ["evaluation metrics must be objects"], []
     failures = []
     rows = []
 
@@ -64,23 +65,41 @@ def evaluate(champion: dict, candidate: dict, thresholds: dict, first_champion=F
     return failures, rows
 
 
-def run_gate(champion_version: str | None, candidate_version: str, models_dir="models", reports_dir="reports", thresholds_path=None) -> dict:
+def run_gate(champion_version: str | None, candidate_version: str, models_dir="models", reports_dir="reports",
+             thresholds_path=None, data_dir="data") -> dict:
     models_dir, reports_dir = Path(models_dir), Path(reports_dir)
+    data_dir = Path(data_dir)
     thresholds_path = Path(thresholds_path or Path(__file__).with_name("thresholds.json"))
     reasons, rows = [], []
     first_champion = champion_version in (None, "", "dummy", "none")
+    eval_set = data_dir / "eval" / "eval_set.jsonl"
+    eval_set_sha1 = None
+    evaluation_sets = {}
     try:
-        champion_path = models_dir / (champion_version or "") / "metadata.json"
-        champion = (
-            json.loads(champion_path.read_text(encoding="utf-8"))
-            if not first_champion or champion_path.is_file()
-            else {}
-        )
-        candidate = json.loads((models_dir / candidate_version / "metadata.json").read_text(encoding="utf-8"))
         thresholds = json.loads(thresholds_path.read_text(encoding="utf-8"))
-        reasons, rows = evaluate(champion, candidate, thresholds, first_champion)
-    except (OSError, ValueError, KeyError) as exc:
-        reasons = [f"Unable to read metadata or thresholds: {exc}"]
+        if not eval_set.is_file():
+            raise FileNotFoundError(f"evaluation set not found: {eval_set}")
+        eval_set_sha1 = hashlib.sha1(eval_set.read_bytes()).hexdigest()
+        from training.evaluate import evaluate as evaluate_model
+
+        champion_metrics = {}
+        if not first_champion:
+            champion_metrics = evaluate_model(champion_version, eval_set, model_root=models_dir, data_dir=data_dir,
+                                              with_bert=True, out=reports_dir / "evaluations" / f"{champion_version}.json")
+        candidate_metrics = evaluate_model(candidate_version, eval_set, model_root=models_dir, data_dir=data_dir,
+                                            with_bert=True, out=reports_dir / "evaluations" / f"{candidate_version}.json")
+        after_sha1 = hashlib.sha1(eval_set.read_bytes()).hexdigest()
+        champion_sha1 = champion_metrics.get("test_set_sha1") if not first_champion else eval_set_sha1
+        candidate_sha1 = candidate_metrics.get("test_set_sha1")
+        evaluation_sets = {"candidate": candidate_sha1}
+        if not first_champion:
+            evaluation_sets["champion"] = champion_sha1
+        if champion_sha1 != candidate_sha1 or candidate_sha1 != eval_set_sha1 or after_sha1 != eval_set_sha1:
+            reasons = ["evaluation set fingerprint differs between champion and candidate"]
+        else:
+            reasons, rows = evaluate(champion_metrics, candidate_metrics, thresholds, first_champion)
+    except Exception as exc:
+        reasons = [f"Unable to evaluate models on the shared evaluation set: {exc}"]
         thresholds = {}
     parity_errors = check_parity(candidate_version, models_dir)
     reasons.extend(f"parity: {error}" for error in parity_errors)
@@ -88,6 +107,8 @@ def run_gate(champion_version: str | None, candidate_version: str, models_dir="m
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "champion": champion_version,
         "candidate": candidate_version,
+        "eval_set_sha1": eval_set_sha1,
+        "evaluation_sets": evaluation_sets,
         "passed": not reasons,
         "reasons": reasons,
         "metrics": rows,
@@ -97,7 +118,10 @@ def run_gate(champion_version: str | None, candidate_version: str, models_dir="m
     with history_path.open("a", encoding="utf-8") as history:
         history.write(json.dumps(result, ensure_ascii=False) + "\n")
     history = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines() if line]
-    report = [f"# Model Gate Report", "", f"## {champion_version or 'none'} vs {candidate_version}", "", "| 지표 | Champion | 후보 |", "|---|---:|---:|"]
+    report = [f"# Model Gate Report", "", f"## {champion_version or 'none'} vs {candidate_version}", "",
+              f"Evaluation set SHA-1: `{eval_set_sha1 or 'unavailable'}`"]
+    report.extend(f"- {version}: `{fingerprint}`" for version, fingerprint in evaluation_sets.items())
+    report.extend(["", "| 지표 | Champion | 후보 |", "|---|---:|---:|"])
     report.extend(f"| {row['metric']} | {row['champion']} | {row['candidate']} |" for row in rows)
     report.extend(["", f"**결과: {'PASS' if result['passed'] else 'FAIL'}**"])
     if reasons:
@@ -109,14 +133,15 @@ def run_gate(champion_version: str | None, candidate_version: str, models_dir="m
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Compare a candidate model with champion")
+    parser = argparse.ArgumentParser(description="Re-evaluate champion and candidate on the shared human-reviewed eval set")
     parser.add_argument("champion")
     parser.add_argument("candidate")
     parser.add_argument("--models-dir", default="models")
     parser.add_argument("--reports-dir", default="reports")
     parser.add_argument("--thresholds", default=None)
+    parser.add_argument("--data-dir", default="data")
     args = parser.parse_args(argv)
-    result = run_gate(args.champion, args.candidate, args.models_dir, args.reports_dir, args.thresholds)
+    result = run_gate(args.champion, args.candidate, args.models_dir, args.reports_dir, args.thresholds, args.data_dir)
     print("PASS" if result["passed"] else "FAIL")
     for reason in result["reasons"]:
         print(f"- {reason}")

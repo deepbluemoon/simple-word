@@ -204,6 +204,11 @@
 - 보류: 서빙 때 뜻 검사(B'), 절 단위 부분 fallback(E) — 위 결과를 보고 결정.
 - 배포 검증을 PR 경로 조건부 + 주 1회로 바꿀지: 사용자 답 대기.
 
+## 47. 게이트 참조 기준 변경 (Codex)
+- `training/evaluate.py`에서 SARI와 `bert_score_ref`를 검수 정답 기준으로 계산하고, 원문 대비 BERTScore는 `bert_score_source` 진단값으로 보존. 원문 그대로와 교사 출력의 SARI·BERTScore 및 공백·조사 분리 근사 SARI도 기록.
+- 게이트가 champion과 후보를 동일 평가셋으로 재평가하고 SHA-1을 비교·보고하도록 변경. 이전 `bert_score` 메타데이터 키는 제거하며, 임계값 0.75는 유지하고 재검토 TODO를 문서화.
+- v2·v3 새 기준 재판정은 Max Mac에서 수행 예정. 명령: `python -m gate.gate v2 v3-base --models-dir models --reports-dir reports/gate-eval-reference --data-dir data`.
+
 ## 사용자 준비 (필요해질 때)
 - 클라우드: GCP 프로젝트·결제(`gcloud auth login`), 도메인(Route 53), Lightsail 2GB 인스턴스·버킷
 - #8 자동 학습: Max Mac `gh auth login`, 러너 토큰
