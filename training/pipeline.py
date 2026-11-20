@@ -11,7 +11,7 @@ feedback.jsonl은 자동 입력으로 쓰지 않는다. 사람과 총괄이 검�
 - 학습~게이트는 한 버전(run)으로 묶는다. 새 버전 이름은 models/ 아래 v<N> 다음 번호.
   게이트가 끝나면(통과·탈락 모두) 그 run을 닫고 last_train에 통과 짝 수를 남긴다 → 다음 학습 기준.
 - 실패하면 어느 단계인지 보고서와 state에 남기고 멈춘다(종료 코드 1).
-- 결과 요약: reports/pipeline-<날짜>.json
+- 결과 요약: reports/pipeline-<날짜>.json(같은 날 다시 돌리면 덮어씀) + 실행마다 reports/pipeline_history.jsonl에 한 줄
 - 게이트 통과 시 models/registry.json에 canary 후보(weight 0)로 적는 데까지만. 업로드·배포는 배포 단계에서.
 """
 import argparse
@@ -26,6 +26,9 @@ from pathlib import Path
 from typing import Callable
 
 DEFAULT_MIN_NEW_PAIRS = 200
+# 교사 단계: 문서마다 최대 8문장, 최근 문서부터(지금까지 데이터를 모은 방식과 같다, .tmp/teacher_loop.sh).
+# 제한 없이 돌리면 짝이 없는 옛 문장(약 2만 개)까지 모두 교사에게 보내 매일 크론이 며칠씩 걸린다.
+TEACHER_PER_DOC = 8
 DATA_STAGES = ("collect", "preprocess", "teacher", "check")
 
 
@@ -129,13 +132,25 @@ def _preprocess(ctx):
 
 def _teacher(ctx):
     from training.teacher import run
-    return {"new_pairs": run(ctx.data_dir, log=ctx.log)}
+    return {"new_pairs": run(ctx.data_dir, log=ctx.log, per_doc=TEACHER_PER_DOC, recent_first=True)}
 
 
 def _check(ctx):
     from training.checks import recheck
     passed, total, reasons = recheck(ctx.data_dir)
     return {"passed": passed, "total": total, "reject_reasons": reasons}
+
+
+ROOT = Path(__file__).resolve().parents[1]
+# 검사 결과(passed)를 바꿀 수 있는 파일: 검사 코드, 숫자 비교(서빙과 같음), 용어 찾기·보존 용어, 어려운 용어 사전.
+CHECK_RULE_FILES = ("training/checks.py", "simple_word/numbers.py", "simple_word/terms.py", "simple_word/preserve_terms.txt")
+
+
+def check_rules_fingerprint(ctx) -> dict:
+    """하나라도 바뀌면 검사 단계를 다시 돈다(예: #59 숫자 비교 변경·되돌림은 numbers.py만 바꿨다)."""
+    files = {name: sha1(ROOT / name) for name in CHECK_RULE_FILES}
+    files["nikl_terms.csv"] = sha1(ctx.data_dir / "nikl_terms.csv")
+    return files
 
 
 def data_stages() -> list[Stage]:
@@ -147,7 +162,7 @@ def data_stages() -> list[Stage]:
         _fingerprint_stage("preprocess", lambda ctx: {"docs": f("docs.jsonl")(ctx)}, _preprocess),
         _fingerprint_stage("teacher", lambda ctx: {"sentences": f("sentences.jsonl")(ctx)}, _teacher),
         # 검사 규칙(checks.py)을 바꿔도 다시 돈다. 출력이 pairs.jsonl 자신이라 실행 뒤 지문을 남긴다
-        _fingerprint_stage("check", lambda ctx: {"pairs": f("pairs.jsonl")(ctx), "rules": sha1(Path(__file__).with_name("checks.py"))}, _check),
+        _fingerprint_stage("check", lambda ctx: {"pairs": f("pairs.jsonl")(ctx), "rules": check_rules_fingerprint(ctx)}, _check),
     ]
 
 
@@ -300,6 +315,10 @@ def run_pipeline(stages: list[Stage], ctx: Context) -> dict:
     ctx.reports_dir.mkdir(parents=True, exist_ok=True)
     path = ctx.reports_dir / f"pipeline-{ctx.today}.json"
     path.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    # 같은 날 다시 돌리면 위 파일은 덮어쓰므로(건너뛰기만 한 실행이 실제로 일한 실행을 지움), 실행마다 한 줄씩 남긴다
+    with (ctx.reports_dir / "pipeline_history.jsonl").open("a", encoding="utf-8") as history:
+        history.write(json.dumps({k: v for k, v in report.items() if k != "stages"} | {
+            "stages": [{k: v for k, v in st.items() if k != "traceback"} for st in report["stages"]]}, ensure_ascii=False) + "\n")
     report["path"] = str(path)
     return report
 
