@@ -16,8 +16,10 @@
 작업의 기준은 GitHub Issues다(https://github.com/deepbluemoon/simple-word/issues). 아래 표는 요약이고, 규칙은 `docs/BRANCHING.md`.
 
 ### 현재 기준
-- **1차 v0.1 완료**: `main` 커밋 `33fe9b6` (`Port ops dashboard to Simple Word`, PR #27).
-- **2차 진행**: #28 v2 champion 완료, #6 로컬 배포·롤백·카나리 검증 완료. #6 클라우드 배포, #7 평가셋 검수, #8 러너·자동화는 남아 있다.
+- **기준 시점**: 2026-11-20, `main`은 PR #51까지의 기능 작업이 반영됐고 최신 문서 진행 기록은 PR #52다.
+- **모델**: v2는 champion. Max가 시간순 분할을 고정하고 `v3-base`와 숫자·보존 용어 자리표시자 모델 `v3-ph`를 학습·평가 중이다. 현재 v3-base epoch 1 valid loss는 1.38(비교 기준 v2 최저 1.61)이며, 최종 게이트 전까지 champion을 바꾸지 않는다.
+- **배포**: Lightsail 롤링 업데이트 로컬 검증 완료. 실제 Lightsail·GCP·Route 53 연결은 계정·도메인 준비 후 진행한다.
+- **데이터**: PR #51에서 두 부처 3,788개 문서, 20,768개 짝, 통과 13,176개까지 2년치 백필했다. 부처 추가는 미진행.
 
 | ID | 작업 | 담당 | 상태 |
 |---|---|---|---|
@@ -30,10 +32,13 @@
 | T7 (#3) | 라우터(champion·canary·shadow, registry 다시 읽기), 부하 차단, 게이트·parity, `reports/` 기록 | Codex | done |
 | T8 | 업로드 웹 화면, Dockerfile·docker compose로 로컬 전체 실행 | Codex | done |
 | T9 (#5) | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS·GCP 감시 + 비용 | codex2 | done |
-| T10 (#6) | 로컬 배포 검증 후 Lightsail·GCP·Route 53 배포와 장애 조치 | codex2 + 사용자(계정·도메인) | doing (로컬 완료, 클라우드 대기) |
-| T11 (#7) | 평가셋 200건 사람 검수 | 사용자 | waiting user |
+| T10 (#6) | 로컬 배포 검증 후 Lightsail·GCP·Route 53 배포와 장애 조치 | codex2 + 사용자(계정·도메인) | doing (롤링 로컬 검증 완료, 클라우드 대기) |
+| T11 (#7) | 검수 평가셋 200건 준비·검수 | Claude Max + 사용자 | done (Claude 검수 193건; 사람 검수 아님) |
 | T8b (#4) | 서비스 화면 Airtable 팔레트 | codex2 | done |
 | T12 (#8) | 셀프호스티드 러너, 수집·누적 학습 워크플로 | 총괄 + 사용자 | waiting user (러너 토큰) |
 | T13 (#28) | 긴 짝·여러 줄 제외 후 백필 데이터로 v2 학습, 시간순 평가와 게이트 검증 | Claude Max | done (v2 champion) |
 | T14 | 서비스 화면 붙여넣기·비교 강조·이어 읽기·내보내기·오류 복구 개선 | codex2 | done |
-| T15 | 실행 이미지 다단계 빌드·런타임 파일 최소화, 모델 서빙 검증 | codex2 | review |
+| T15 (#44) | 실행 이미지 다단계 빌드·런타임 파일 최소화, 모델 서빙 검증 | codex2 | done |
+| T16 (#50) | 어려운 용어 사전 검색 최적화 | Codex | done (부분 문자열 사전 검사) |
+| T17 (#51) | 행안부·복지부 과거 보도자료 백필 | Claude Max | done (3,788문서, 통과 짝 13,176) |
+| T18 | 자리표시자 포함 v3 모델 학습·INT8 평가·게이트 비교 | Claude Max | doing |

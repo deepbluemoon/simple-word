@@ -49,3 +49,10 @@
 - `max/8-pipeline`: `training/pipeline.py`(단계 건너뛰기·N건 기준·실패 기록·`reports/pipeline-<날짜>.json`), `gate/registry.py`(`register_candidate`: canary 후보 weight 0), 크론·launchd 예시(`deploy/schedule/`), `.github/workflows/train.yml` 초안, `tests/test_pipeline.py`. 설명은 `docs/PIPELINE.md`.
 - 지금 데이터 기준 통과 짝 2,053 = v2 학습 크기 → 새 짝이 200건 늘기 전에는 학습하지 않는다.
 - 남은 것: 러너 등록(label `trainer`)과 저장소 변수 `TRAINER_ENABLED`·`TRAINER_HOME` (사용자).
+
+## 2026-11-20 기준 상태 (main, PR #51까지 기능 반영)
+- 최신 main에는 PR #51의 2년치 백필 결과가 반영되어 있다: 보도자료 3,788건, 교사 짝 20,768건, 자동 검사 통과 13,176건. 출처는 행정안전부·보건복지부이며 부처 추가는 아직 안 했다. PR #52는 이 진행 기록을 반영한 문서 변경이다.
+- Max가 v3 학습 중이다. 같은 시간순 분할에서 `v3-base`와 숫자·보존 용어 자리표시자 `v3-ph`를 각각 학습하고 INT8 평가·게이트 결과를 비교한다. 현재 v3-base epoch 1 valid loss 1.38, v2 최저 1.61. 게이트를 통과한 후보가 나오기 전에는 champion을 변경하지 않는다.
+- PR #50의 `found()` 최적화는 사전 1,627개 용어 × 합성 문장 10,000개에서 결과 2,157건 일치, 최적화 후 1.398초였다. 기존 방식 100문장 측정 37.473초를 선형 환산하면 약 62.5분(추정)이다.
+- 배포 확정안: Route 53 기본 Lightsail 90 / GCP 10, 장애 위치는 헬스체크로 제외. Lightsail은 champion만 두 컨테이너로 롤링하고, GCP Cloud Run에서만 리비전 비율 카나리·섀도·오토스케일링을 한다. Route 53 실제 가중치 훅은 클라우드 계정·레코드 준비 후 연결한다.
+- 다음 남은 일: v3 학습·평가 결과 반영, runner 토큰 준비 후 자동 학습 연결, 클라우드 계정·도메인 준비 후 실배포와 장애 훈련. 평가셋은 Claude가 193건을 검수했으며 사람의 재검토는 별도 결정 사항이다.
