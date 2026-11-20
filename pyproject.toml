@@ -34,4 +34,4 @@ omit = [
 packages = ["simple_word", "api", "gate", "training"]
 
 [tool.setuptools.package-data]
-simple_word = ["*.txt"]
+simple_word = ["*.txt", "*.json"]

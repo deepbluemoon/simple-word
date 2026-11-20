@@ -1,7 +1,7 @@
 import re
 
 from simple_word.terms import found
-from training.terms import coverage, merge_dicts, parse_law_xml, parse_nikl
+from training.terms import LAW_SOURCE, coverage, merge_dicts, parse_law_cache, parse_law_xml, parse_nikl
 
 
 def test_found_matches_original_regex_results():
@@ -128,3 +128,10 @@ def test_fetch_law_terms_refuses_concurrent_run(tmp_path, monkeypatch):
         with pytest.raises(terms.LawFetchBusy):
             terms.fetch_law_terms(["제고"], tmp_path, key="k", targets=("lstrmRlt",), get=lambda *a: "<x/>", delay=0, log=lambda m: None)
     assert terms.fetch_law_terms(["제고"], tmp_path, key="k", targets=("lstrmRlt",), get=lambda *a: "<x/>", delay=0, log=lambda m: None) == 1
+
+
+def test_law_cache_jsonl_generates_runtime_candidates():
+    cached = '{"response":{"lstrmNm":"익일","dlytrmNm":"다음 날"}}\n'
+    assert parse_law_cache(cached)["익일"] == {
+        "alternatives": ["다음 날"], "sources": [LAW_SOURCE],
+    }

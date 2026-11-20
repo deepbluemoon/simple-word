@@ -39,8 +39,8 @@ def test_simplify_txt_returns_original_and_simple_sentences():
     assert response.json() == {
         "model_version": "dummy",
         "sentences": [
-            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False, "fallback_reason": None, "paragraph_id": 0, "title": False},
-            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False, "fallback_reason": None, "paragraph_id": 0, "title": False},
+            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False, "fallback_reason": None, "paragraph_id": 0, "title": False, "terms": []},
+            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False, "fallback_reason": None, "paragraph_id": 0, "title": False, "terms": []},
         ],
     }
 
@@ -81,7 +81,7 @@ def test_simplify_extracts_docx_text():
 
     assert response.status_code == 200
     assert response.json()["sentences"] == [{"original": "안내 문장입니다.", "simple": "안내 문장입니다.", "fallback": False,
-                                             "fallback_reason": None, "paragraph_id": 0, "title": False}]
+                                             "fallback_reason": None, "paragraph_id": 0, "title": False, "terms": []}]
 
 
 @pytest.mark.parametrize("filename", ["notice.txt", "application.docx", "facility.hwpx"])
@@ -434,7 +434,7 @@ def test_simplify_response_has_fallback_per_sentence_and_feedback_accepts_it(mon
     assert response.status_code == 200
 
 
-def test_simplify_reports_fallback_reason_and_paragraph(monkeypatch):
+def test_simplify_reports_fallback_reason_paragraph_and_terms(monkeypatch):
     class ExplainedModel:
         def simplify_explained(self, sentences):
             return [(sentence, True, "numbers") if "20일" in sentence else (sentence, False, None)
@@ -445,11 +445,15 @@ def test_simplify_reports_fallback_reason_and_paragraph(monkeypatch):
             return "v-explain", "champion", ExplainedModel(), None, None
 
     monkeypatch.setattr(api_main, "router", OneRouter())
+    monkeypatch.setattr(api_main, "terms_in", lambda sentence: [{
+        "text": "안에", "start": 4, "end": 6, "easy": ["속에"], "source": "국립국어원_15130006",
+    }] if "안에" in sentence else [])
     response = client.post("/simplify", files={"file": ("notice.txt", "20일 안에 신청.\n\n다음 문단은 확인합니다.")})
 
     assert response.json()["sentences"] == [
         {"original": "20일 안에 신청.", "simple": "20일 안에 신청.", "fallback": True,
-         "fallback_reason": "numbers", "paragraph_id": 0, "title": False},
+         "fallback_reason": "numbers", "paragraph_id": 0, "title": False,
+         "terms": [{"text": "안에", "start": 4, "end": 6, "easy": ["속에"], "source": "국립국어원_15130006"}]},
         {"original": "다음 문단은 확인합니다.", "simple": "다음 문단은 확인합니다.", "fallback": False,
-         "fallback_reason": None, "paragraph_id": 1, "title": False},
+         "fallback_reason": None, "paragraph_id": 1, "title": False, "terms": []},
     ]

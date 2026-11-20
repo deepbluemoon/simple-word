@@ -21,6 +21,7 @@ from starlette.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from api.router import ModelRouter
+from simple_word.terms import terms_in
 
 app = FastAPI()
 LOG_DIR = Path(os.getenv("LOG_DIR", "./logs"))
@@ -208,10 +209,10 @@ def simplify_content(filename: str, data: bytes, request_id: str):
         raise HTTPException(status_code=500, detail="Model inference failed") from exc
     log_request(request_id, role, version, sentences, simplified, started, fallbacks=fallbacks)
     items = ([{"original": title, "simple": title, "fallback": False, "fallback_reason": None,
-               "paragraph_id": 0, "title": True}] if title is not None else [])
+               "paragraph_id": 0, "title": True, "terms": []}] if title is not None else [])
     items.extend(
         {"original": original, "simple": simple, "fallback": fallback, "fallback_reason": reason,
-         "paragraph_id": paragraph_id, "title": False}
+         "paragraph_id": paragraph_id, "title": False, "terms": terms_in(original)}
         for (paragraph_id, original), simple, fallback, reason in zip(
             paragraph_sentences, simplified, fallbacks, fallback_reasons
         )

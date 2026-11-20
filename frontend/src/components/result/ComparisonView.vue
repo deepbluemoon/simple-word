@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
-import { diffWords } from '@/lib/textDiff'
 
-const props = defineProps<{ original: string; simple: string }>()
-const diff = computed(() => diffWords(props.original, props.simple))
+const props = defineProps<{ original: string; simple: string; diff: ReturnType<typeof import('@/lib/textDiff').diffWords> }>()
+const diff = computed(() => props.diff)
 const helpId = `diff-help-${useId()}`
 const originalPane = ref<HTMLElement | null>(null)
 const simplePane = ref<HTMLElement | null>(null)

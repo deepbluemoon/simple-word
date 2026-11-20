@@ -5,7 +5,10 @@ export interface SentenceResult {
   fallback_reason?: 'numbers' | 'preserve' | 'length' | null
   paragraph_id?: number
   title?: boolean
+  terms?: DifficultTerm[]
 }
+
+export interface DifficultTerm { text: string; start: number; end: number; easy: string[]; source: string }
 
 export interface AnalysisResult {
   id: string
