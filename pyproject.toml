@@ -18,11 +18,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "httpx"]
+test = ["pytest", "pytest-cov", "httpx"]
 train = ["torch", "transformers", "onnx", "bert-score"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+omit = [
+    "training/train.py", # Torch training loop and checkpointing
+    "training/export.py", # Torch/ONNX conversion
+    "training/teacher.py", # Ollama network calls
+]
 
 [tool.setuptools]
 packages = ["simple_word", "api", "gate", "training"]

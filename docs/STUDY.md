@@ -64,3 +64,10 @@
 ## 9. 자리표시자 학습 실험
 - **자리표시자(placeholder)**: 학습 입력에서 숫자·날짜·금액과 보존 용어를 임시 표식으로 바꾸고, 모델 출력 뒤 원래 값을 복원하는 방법이다. 모델이 숫자나 법률·기관 명칭을 새로 만들거나 바꾸는 실수를 줄일 수 있다.
 - v3에서는 동일한 시간순 분할로 기본 모델(`v3-base`)과 자리표시자를 적용한 모델(`v3-ph`)을 각각 학습·양자화·평가해 비교한다. 실험 결과가 좋아야 후보로 올리며, 자릿값 복원이나 문맥이 깨지면 채택하지 않는다.
+
+## 10. 코드 커버리지
+- **라인 커버리지**는 테스트가 실제로 실행한 코드 줄의 비율이다. CI는 `api`, `simple_word`, `gate` Python 패키지와 frontend의 `src/lib`, `src/stores`, `src/api`를 각각 80% 이상으로 요구한다. Python은 `pytest-cov`의 `--cov-fail-under=80`, 프런트엔드는 Vitest v8의 경로별 `lines: 80` 기준을 쓴다.
+- 프런트엔드 보고서는 `src/components`와 `src/views`도 포함해 테스트가 닿은 범위를 보여 주지만, 이 화면 전체에는 별도 80% 기준을 두지 않는다. 핵심 데이터 처리 모듈 기준을 유지하면서 화면별 테스트 확대 여지를 보기 위해서다.
+- 학습 쪽은 모델 백엔드 없이 시험할 수 있는 `checks`, `preprocess`, `terms`, `eval_set`, `stats`, `pipeline`만 측정한다. `train.py`는 Torch 학습, `export.py`는 ONNX 변환, `teacher.py`는 Ollama 호출을 수행하므로 제외 목록과 이유를 `pyproject.toml`에 둔다. 별도 평가 모듈처럼 모델·네트워크 실행 경로가 필요한 코드는 순수 함수 범위에 넣지 않는다.
+- **80%는 품질 보증이 아니다.** 줄이 실행됐다는 뜻일 뿐, 결과가 맞는지·경계값을 확인했는지 보장하지 않는다. 숫자 보존, 오류 응답, 회귀 사례처럼 중요한 동작을 직접 검증하는 테스트와 함께 본다.
+- 해보기: 저장소 루트에서 `python -m pytest -q --cov=simple_word --cov-report=term-missing --cov-fail-under=80`, `cd frontend && npm run test:coverage`를 실행한다.
