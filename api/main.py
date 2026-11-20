@@ -244,7 +244,7 @@ def simplify_content(filename: str, data: bytes, request_id: str):
         "model_version": version,
         "sentences": [
             {"original": original, "simple": simple, "fallback": fallback, "fallback_reason": reason,
-             "paragraph": paragraph_id, "paragraph_id": paragraph_id}
+             "paragraph_id": paragraph_id}
             for (paragraph_id, original), simple, fallback, reason in zip(
                 paragraph_sentences, simplified, fallbacks, fallback_reasons
             )

@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { sendFeedback } from '@/api/simpleWord'
+import { getFeedbackVote, saveFeedbackVote } from '@/stores/feedbackVotes'
 
-const props = defineProps<{ modelVersion: string; original: string; simple: string }>()
-const vote = ref<'up' | 'down' | null>(null)
+const props = defineProps<{ resultId: string; sentenceIndex: number; modelVersion: string; original: string; simple: string }>()
+const vote = computed(() => getFeedbackVote(props.resultId, props.sentenceIndex))
 const busy = ref(false)
 const error = ref('')
 async function send(value: 'up' | 'down') {
-  if (busy.value) return
+  if (busy.value || vote.value) return
   busy.value = true; error.value = ''
-  try { await sendFeedback(props.modelVersion, props.original, props.simple, value); vote.value = value }
+  try {
+    await sendFeedback(props.modelVersion, props.original, props.simple, value)
+    saveFeedbackVote(props.resultId, props.sentenceIndex, value)
+  }
   catch { error.value = '의견을 보내지 못했어요. 다시 시도해 주세요.' }
   finally { busy.value = false }
 }
@@ -18,8 +22,8 @@ async function send(value: 'up' | 'down') {
 <template>
   <div class="feedback" data-part="sentence-feedback">
     <span class="t-caption-sm muted">이 문장이 도움이 됐나요?</span>
-    <button type="button" class="btn btn-secondary" :disabled="busy" :aria-pressed="vote === 'up'" @click="send('up')">👍 좋아요</button>
-    <button type="button" class="btn btn-secondary" :disabled="busy" :aria-pressed="vote === 'down'" @click="send('down')">👎 아쉬워요</button>
+    <button type="button" class="btn btn-secondary" :disabled="busy || vote !== null" :aria-pressed="vote === 'up'" @click="send('up')">👍 좋아요</button>
+    <button type="button" class="btn btn-secondary" :disabled="busy || vote !== null" :aria-pressed="vote === 'down'" @click="send('down')">👎 아쉬워요</button>
     <span v-if="vote" class="feedback-success t-caption-sm" role="status" aria-live="polite">의견 감사합니다.</span><span v-if="error" class="error-message" role="alert">{{ error }}</span>
   </div>
 </template>

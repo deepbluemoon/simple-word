@@ -39,8 +39,8 @@ def test_simplify_txt_returns_original_and_simple_sentences():
     assert response.json() == {
         "model_version": "dummy",
         "sentences": [
-            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False, "fallback_reason": None, "paragraph": 0, "paragraph_id": 0},
-            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False, "fallback_reason": None, "paragraph": 0, "paragraph_id": 0},
+            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False, "fallback_reason": None, "paragraph_id": 0},
+            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False, "fallback_reason": None, "paragraph_id": 0},
         ],
     }
 
@@ -72,7 +72,7 @@ def test_simplify_extracts_docx_text():
 
     assert response.status_code == 200
     assert response.json()["sentences"] == [{"original": "안내 문장입니다.", "simple": "안내 문장입니다.", "fallback": False,
-                                             "fallback_reason": None, "paragraph": 0, "paragraph_id": 0}]
+                                             "fallback_reason": None, "paragraph_id": 0}]
 
 
 def test_simplify_extracts_hwpx_text():
@@ -430,7 +430,7 @@ def test_simplify_reports_fallback_reason_and_paragraph(monkeypatch):
 
     assert response.json()["sentences"] == [
         {"original": "20일 안에 신청.", "simple": "20일 안에 신청.", "fallback": True,
-         "fallback_reason": "numbers", "paragraph": 0, "paragraph_id": 0},
+         "fallback_reason": "numbers", "paragraph_id": 0},
         {"original": "다음 문단은 확인합니다.", "simple": "다음 문단은 확인합니다.", "fallback": False,
-         "fallback_reason": None, "paragraph": 1, "paragraph_id": 1},
+         "fallback_reason": None, "paragraph_id": 1},
     ]

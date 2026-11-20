@@ -24,7 +24,7 @@ export function groupSentenceParagraphs(sentences: SentenceResult[]) {
   const paragraphs: SentenceResult[][] = []
   let currentId: number | undefined
   for (const sentence of sentences) {
-    const id = sentence.paragraph ?? sentence.paragraph_id ?? 0
+    const id = sentence.paragraph_id ?? 0
     if (id !== currentId) { paragraphs.push([]); currentId = id }
     paragraphs.at(-1)!.push(sentence)
   }

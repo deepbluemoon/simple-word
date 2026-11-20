@@ -8,6 +8,7 @@ import C5VerdictBadge from '@/components/common/C5VerdictBadge.vue'
 import ComparisonView from '@/components/result/ComparisonView.vue'
 import S5FeedbackPanel from './S5FeedbackPanel.vue'
 import { diffWords } from '@/lib/textDiff'
+import type { SentenceResult } from '@/api/simpleWord'
 
 const props = defineProps<{ id: string }>()
 const result = computed(() => findResult(props.id))
@@ -22,16 +23,20 @@ const paragraphs = computed(() => groupParagraphs(result.value?.sentences ?? [])
 const documentParagraphs = computed(() => {
   let index = 0
   return groupSentenceParagraphs(result.value?.sentences ?? []).map((paragraph) =>
-    paragraph.map((sentence) => ({ sentence, index: index++ })),
+    paragraph.map((sentence) => ({
+      sentence,
+      index: index++,
+      parts: sentence.fallback
+        ? [{ text: sentence.original, kind: 'same' as const, numeric: false }]
+        : diffWords(sentence.original, sentence.simple).simple,
+    })),
   )
 })
 const selectedSentence = computed(() => selectedIndex.value == null ? null : result.value?.sentences[selectedIndex.value] ?? null)
 const changedCount = computed(() => result.value?.sentences.filter((sentence) => sentence.original !== sentence.simple).length ?? 0)
 const easyText = computed(() => paragraphs.value.join('\n\n'))
-const sideBySideText = computed(() => result.value?.sentences.map((sentence, index) => `문장 ${index + 1}\n원문: ${sentence.original}\n쉬운 말: ${sentence.simple}`).join('\n\n') ?? '')
-function easyParts(sentence: NonNullable<typeof result.value>['sentences'][number]) {
-  return sentence.fallback ? [{ text: sentence.original, kind: 'same' as const, numeric: false }] : diffWords(sentence.original, sentence.simple).simple
-}
+const sideBySideText = computed(() => result.value?.sentences.map((sentence, index) => `문장 ${index + 1}\n원문: ${sentence.original}\n쉬운 말: ${outputSentence(sentence)}`).join('\n\n') ?? '')
+function outputSentence(sentence: SentenceResult) { return sentence.fallback ? sentence.original : sentence.simple }
 function setViewMode(mode: 'document' | 'sentences') {
   viewMode.value = mode
   void nextTick(() => viewTabButtons[mode === 'document' ? 0 : 1]?.focus())
@@ -39,7 +44,7 @@ function setViewMode(mode: 'document' | 'sentences') {
 
 async function focusHeading() { await nextTick(); heading.value?.focus({ preventScroll: true }) }
 onMounted(() => { void focusHeading() })
-watch(() => props.id, () => { void focusHeading() })
+watch(() => props.id, () => { selectedIndex.value = null; viewMode.value = 'document'; void focusHeading() })
 watch(readerSize, saveReaderSize)
 
 async function copySimple() {
@@ -89,17 +94,17 @@ function reasonText(reason?: string | null) {
         <span v-if="exportError" class="reader-status error-message" role="alert">{{ exportError }}</span>
       </section>
 
-      <section v-show="viewMode === 'document'" id="document-panel" class="section tight document-layout" :class="`reader-${readerSize}`" aria-labelledby="document-tab" role="tabpanel">
+      <section v-if="viewMode === 'document'" id="document-panel" class="section tight document-layout" :class="`reader-${readerSize}`" aria-labelledby="document-tab" role="tabpanel">
         <article class="document-page" aria-label="쉬운 말 문서">
           <p class="document-legend"><span class="change-swatch" aria-hidden="true" />옅은 노랑과 ‘바뀐 부분’ 표시는 원문과 달라진 말이에요. <span class="fallback-swatch" aria-hidden="true">원문 유지</span> 점선 밑줄은 원문을 그대로 둔 문장이에요.</p>
           <p v-for="(paragraph, paragraphIndex) in documentParagraphs" :key="paragraphIndex" class="document-paragraph">
             <template v-for="item in paragraph" :key="item.index">
-              <button type="button" class="document-sentence" :class="{ selected: selectedIndex === item.index, fallback: item.sentence.fallback }" :aria-pressed="selectedIndex === item.index" :data-sentence="item.index" @click="selectedIndex = item.index" @keydown.enter.prevent="selectedIndex = item.index" @keydown.space.prevent="selectedIndex = item.index">
-                <template v-for="(part, partIndex) in easyParts(item.sentence)" :key="partIndex">
+              <span role="button" tabindex="0" class="document-sentence" :class="{ selected: selectedIndex === item.index, fallback: item.sentence.fallback }" :aria-pressed="selectedIndex === item.index" :data-sentence="item.index" @click="selectedIndex = item.index" @keydown.enter.prevent="selectedIndex = item.index" @keydown.space.prevent="selectedIndex = item.index">
+                <template v-for="(part, partIndex) in item.parts" :key="partIndex">
                   <mark v-if="part.kind === 'added'"><span class="visually-hidden">바뀐 부분: </span>{{ part.text }}</mark><template v-else>{{ part.text }}</template>
                 </template>
                 <span v-if="item.sentence.fallback" class="visually-hidden">원문 유지. </span>
-              </button><span aria-hidden="true"> </span>
+              </span><span aria-hidden="true"> </span>
             </template>
           </p>
         </article>
@@ -108,18 +113,18 @@ function reasonText(reason?: string | null) {
             <h2 class="t-heading-sm">선택한 문장</h2>
             <dl><dt>원문</dt><dd>{{ selectedSentence.original }}</dd></dl>
             <p v-if="selectedSentence.fallback" class="fallback-reason">{{ reasonText(selectedSentence.fallback_reason) }}</p>
-            <S5FeedbackPanel :model-version="result.model_version" :original="selectedSentence.original" :simple="selectedSentence.simple" />
+            <S5FeedbackPanel :key="selectedIndex ?? -1" :result-id="result.id" :sentence-index="selectedIndex!" :model-version="result.model_version" :original="selectedSentence.original" :simple="outputSentence(selectedSentence)" />
           </template>
           <p v-else class="t-body-sm muted">문장을 누르거나 키보드로 선택하면 원문과 의견을 볼 수 있어요.</p>
         </aside>
       </section>
-      <section v-show="viewMode === 'sentences'" id="sentences-panel" class="section tight sentence-list" :class="`reader-${readerSize}`" aria-labelledby="sentences-tab" role="tabpanel">
+      <section v-else id="sentences-panel" class="section tight sentence-list" :class="`reader-${readerSize}`" aria-labelledby="sentences-tab" role="tabpanel">
         <header class="comparison-summary"><h2 class="t-heading-md">문장별 비교</h2><span class="t-body-sm muted">{{ changedCount }} / {{ result.sentences.length }}개 문장에서 말이 바뀌었어요</span></header>
         <article v-for="(sentence, index) in result.sentences" :key="index" class="card sentence-card" :data-sentence="index">
           <div class="sentence-head"><h2 class="t-heading-sm">문장 {{ index + 1 }}</h2><C5VerdictBadge :fallback="sentence.fallback" /></div>
-          <ComparisonView :original="sentence.original" :simple="sentence.simple" />
+          <ComparisonView :original="sentence.original" :simple="outputSentence(sentence)" />
           <p v-if="sentence.fallback" class="fallback-reason" data-part="fallback-reason">{{ reasonText(sentence.fallback_reason) }}</p>
-          <S5FeedbackPanel :model-version="result.model_version" :original="sentence.original" :simple="sentence.simple" />
+          <S5FeedbackPanel :result-id="result.id" :sentence-index="index" :model-version="result.model_version" :original="sentence.original" :simple="outputSentence(sentence)" />
         </article>
       </section>
     </template>

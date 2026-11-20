@@ -16,7 +16,7 @@ test('CSP allows Vue scripts and dynamic inline styles', async ({ page }) => {
   })
   await page.route('**/simplify', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500))
-    await route.fulfill({ json: { model_version: 'e2e', sentences: [{ original: '안내 문장입니다.', simple: '안내 문장입니다.', fallback: false, paragraph_id: 0 }] } })
+    await route.continue()
   })
   const response = await page.goto('/')
   expect(response?.headers()['content-security-policy']).toBe(policy)
@@ -29,33 +29,39 @@ test('CSP allows Vue scripts and dynamic inline styles', async ({ page }) => {
 })
 
 test('uploads a public document, sends sentence feedback, and restores the result after reload', async ({ page }) => {
-  await page.route('**/simplify', (route) => route.fulfill({ json: { model_version: 'e2e', sentences: [
-    { original: '신청서는 제출해야 합니다.', simple: '신청서는 내야 합니다.', fallback: false, paragraph: 0, paragraph_id: 0 },
-    { original: '수수료는 400원입니다.', simple: '수수료는 400원입니다.', fallback: true, fallback_reason: 'numbers', paragraph: 1, paragraph_id: 1 },
-  ] } }))
-  await page.route('**/feedback', (route) => route.fulfill({ json: { saved: true } }))
+  const firstSentence = '신청 안내 내용을 확인해 주세요, 필요한 서류를 빠짐없이 준비하고 접수 창구에 제출한 뒤 담당자의 확인을 기다려 주시기 바랍니다, 접수 결과는 등록한 연락처로 안내해 드립니다.'
+  const source = `${firstSentence}\n\n수수료는 400원입니다.`
+  await page.setViewportSize({ width: 400, height: 800 })
   await page.goto('/')
   await page.locator('input[type=file]').setInputFiles({
     name: '주민 안내문.txt',
     mimeType: 'text/plain',
-    buffer: Buffer.from('신청은 2026년 12월 31일까지 해야 합니다.\n수수료는 400원입니다.'),
+    buffer: Buffer.from(source),
   })
   await expect(page.getByText('주민 안내문.txt')).toBeVisible()
+  const simplifyResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/simplify' && response.request().method() === 'POST')
   await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
+  const actual = await (await simplifyResponse).json()
+  expect(actual.sentences.map((sentence: { original: string }) => sentence.original)).toEqual([firstSentence, '수수료는 400원입니다.'])
+  expect(actual.sentences.map((sentence: { paragraph_id: number }) => sentence.paragraph_id)).toEqual([0, 1])
   await expect(page.getByRole('heading', { name: '쉬운 말로 바꾼 결과' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: '진행 단계' })).toContainText('문장 나누기 완료')
   await expect(page.getByRole('tab', { name: '문서 보기' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('.document-paragraph')).toHaveCount(2)
-  await expect(page.locator('.document-sentence mark')).toContainText('내야')
+  const longSentence = page.locator('.document-sentence').first()
+  await expect(longSentence).toContainText(firstSentence)
+  expect(await longSentence.evaluate((element) => element.tagName)).toBe('SPAN')
+  expect(await longSentence.evaluate((element) => element.getClientRects().length)).toBeGreaterThan(1)
   await page.getByRole('tab', { name: '문장별 보기' }).click()
   await expect(page.locator('#sentences-panel').getByText(/개 문장에서 말이 바뀌었어요/)).toBeVisible()
   await page.getByRole('tab', { name: '문서 보기' }).click()
-  const fallbackSentence = page.locator('.document-sentence').nth(1)
-  await fallbackSentence.focus()
+  const selectedSentence = page.locator('.document-sentence').first()
+  await selectedSentence.focus()
   await page.keyboard.press('Enter')
-  await expect(page.locator('.clause-note')).toContainText('수수료는 400원입니다.')
-  await expect(page.locator('.clause-note')).toContainText('숫자나 날짜를 안전하게 지키려고 원문을 유지했어요.')
+  await expect(page.locator('.clause-note')).toContainText(firstSentence)
+  const feedbackResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/feedback' && response.request().method() === 'POST')
   await page.getByRole('button', { name: /좋아요/ }).first().click()
+  expect((await feedbackResponse).status()).toBe(200)
   await expect(page.getByText('의견 감사합니다.')).toBeVisible()
   const resultUrl = page.url()
   await page.reload()

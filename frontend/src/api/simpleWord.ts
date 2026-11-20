@@ -3,7 +3,6 @@ export interface SentenceResult {
   simple: string
   fallback: boolean
   fallback_reason?: 'numbers' | 'preserve' | 'length' | null
-  paragraph?: number
   paragraph_id?: number
 }
 
