@@ -133,6 +133,10 @@ def _law_get(target, query, key):
     return _get(url).decode("utf-8", errors="replace")
 
 
+class LawFetchBusy(RuntimeError):
+    """같은 캐시에 다른 조회가 이미 쓰고 있음."""
+
+
 def fetch_law_terms(words, data_dir="data", key=None, targets=LAW_TARGETS, get=_law_get, delay=LAW_DELAY, log=print):
     """용어별로 법제처 연계 API를 불러 data/law_cache.jsonl에 쌓는다. 이미 받은 (target, 용어)는 다시 안 받는다.
     키가 없거나 인증 오류면 받지 않고 끝낸다. 저장 전에 응답 속 링크의 OC 값을 지운다. → 새로 받은 수"""
@@ -142,12 +146,18 @@ def fetch_law_terms(words, data_dir="data", key=None, targets=LAW_TARGETS, get=_
     if not key:
         log("LAW_OC 없음 — 법제처 용어 받기 건너뜀 (.env 에 LAW_OC=인증값)")
         return 0
+    import fcntl
+
     cache = Path(data_dir) / "law_cache.jsonl"
-    done = set()
-    if cache.exists():
-        done = {(r["target"], r["query"]) for r in map(json.loads, cache.open(encoding="utf-8"))}
+    cache.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with cache.open("a", encoding="utf-8") as out:
+        # 두 조회가 같은 캐시에 쓰면 서로 받은 것을 몰라 같은 낱말을 다시 받는다(2026-11-20 중복 6,477쌍). 하나만 돌게 잠근다.
+        try:
+            fcntl.flock(out, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise LawFetchBusy(f"{cache}: 다른 법제처 조회가 이미 돌고 있다") from None
+        done = {(r["target"], r["query"]) for r in map(json.loads, filter(str.strip, cache.open(encoding="utf-8")))}
         for word in words:
             for target in targets:
                 if (target, word) in done:

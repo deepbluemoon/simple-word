@@ -115,3 +115,16 @@ def test_law_terms_are_opt_in_and_strict_drops_daily_words(tmp_path):
     assert not any(T.LAW_SOURCE in e["sources"] for e in T.nikl_dict(tmp_path).values())
     assert {"제고", "지원"} <= set(T.law_dict(tmp_path))
     assert set(T.law_dict(tmp_path, strict=True)) == {"제고"}
+
+
+def test_fetch_law_terms_refuses_concurrent_run(tmp_path, monkeypatch):
+    import fcntl
+    import pytest
+    from training import terms
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    cache = tmp_path / "law_cache.jsonl"
+    with cache.open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        with pytest.raises(terms.LawFetchBusy):
+            terms.fetch_law_terms(["제고"], tmp_path, key="k", targets=("lstrmRlt",), get=lambda *a: "<x/>", delay=0, log=lambda m: None)
+    assert terms.fetch_law_terms(["제고"], tmp_path, key="k", targets=("lstrmRlt",), get=lambda *a: "<x/>", delay=0, log=lambda m: None) == 1
