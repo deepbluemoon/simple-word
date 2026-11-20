@@ -41,6 +41,19 @@ def leakage(splits, eval_texts=()):
             "eval_set_overlap": sum(t in exact or _near(t) in near for t in eval_texts)}
 
 
+def audit(splits):
+    """학습 짝 검사(모두 0이어야 학습한다): 개인정보(주민번호·이메일·전화, preprocess.PII)가 가려지지 않고 남은 짝,
+    교사 필터(training.checks: 여러 줄, 길이 1.3배 초과, 숫자 불일치)에 걸리는 짝."""
+    from training.checks import MAX_LEN_RATIO, numbers
+    from training.preprocess import PII
+
+    rows = [r for part in splits.values() for r in part]
+    return {"pii_unmasked": sum(any(p.search(r["src"]) or p.search(r["tgt"]) for p, _ in PII) for r in rows),
+            "multiline": sum("\n" in r["tgt"].strip() for r in rows),
+            "length_over": sum(len(r["tgt"]) > MAX_LEN_RATIO * len(r["src"]) for r in rows),
+            "numbers_mismatch": sum(numbers(r["src"]) != numbers(r["tgt"]) for r in rows)}
+
+
 def stop_epoch(valid_losses, patience=2):
     """early stopping: valid 손실이 patience 번 연속 최저를 못 넘으면 멈춘다. (멈출지, 가장 좋은 epoch 번호 1부터)"""
     best = min(range(len(valid_losses)), key=valid_losses.__getitem__)
@@ -135,6 +148,9 @@ def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", mo
     leaks = leakage(splits, eval_texts)
     if any(v for k, v in leaks.items() if k != "parity_overlap"):
         raise ValueError(f"train과 valid/test가 겹친다: {leaks}")
+    audited = audit(splits)
+    if any(audited.values()):
+        raise ValueError(f"학습 짝 검사 실패(개인정보·교사 필터): {audited}")
 
     import torch
     from transformers import AutoTokenizer, BartForConditionalGeneration
@@ -184,7 +200,7 @@ def train(version, pairs_paths, epochs=8, lr=5e-5, batch=8, data_root="data", mo
     tok.save_pretrained(out)
     metrics = {"base_model": BASE, "data_snapshot": str(snapshot), "device": device, "seed": SEED, "epochs": epochs,
                "lr": lr, "batch": batch, "train_seconds": round(time.time() - t0, 1),
-               "best_epoch": best_epoch, "patience": patience, "split": split, "sizes": {k: len(v) for k, v in splits.items()}, "leakage": leaks, "history": history,
+               "best_epoch": best_epoch, "patience": patience, "split": split, "sizes": {k: len(v) for k, v in splits.items()}, "leakage": leaks, "audit": audited, "history": history,
                "placeholders": ph_info, "eval_set": str(eval_set) if eval_set else None}
     (out / "train_metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=1), encoding="utf-8")
     return metrics
@@ -207,7 +223,7 @@ if __name__ == "__main__":
         pub = {d["id"]: d["published_at"] for d in map(json.loads, open(a.docs, encoding="utf-8"))} if a.docs else {}
         sp = make_splits(a.pairs, Path("data") / a.version, a.split, pub)
         ev = [json.loads(l)["src"] for l in open(a.eval_set, encoding="utf-8")] if a.eval_set else []
-        print(json.dumps({"sizes": {k: len(v) for k, v in sp.items()}, "leakage": leakage(sp, ev)}, ensure_ascii=False))
+        print(json.dumps({"sizes": {k: len(v) for k, v in sp.items()}, "leakage": leakage(sp, ev), "audit": audit(sp)}, ensure_ascii=False))
     else:
         print(json.dumps(train(a.version, a.pairs, a.epochs, a.lr, a.batch, split=a.split, docs=a.docs, eval_set=a.eval_set,
                                placeholders=a.placeholders),
