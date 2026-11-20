@@ -71,3 +71,28 @@ def test_bert_score_groups_unpacks_candidate_and_target_lists(monkeypatch):
     from training.evaluate import bert_score_groups
     assert bert_score_groups({"model": (["a", "b"], ["x", "y"]), "teacher": (["c"], ["z"]), "empty": ([], [])}) == {
         "model": 0.6, "teacher": 0.9}
+
+
+def test_sari_multi_reference_matches_single_and_rewards_any_reference():
+    from training.evaluate import references, sari, sari_morpheme
+    src, out = "원문의 어려운 낱말을 씁니다.", "원문의 쉬운 말을 씁니다."
+    assert sari(src, out, "원문의 쉬운 말을 씁니다.") == sari(src, out, ["원문의 쉬운 말을 씁니다."])
+    other = "처음 글의 쉬운 말을 씁니다."
+    assert sari(src, out, [other, "원문의 쉬운 말을 씁니다."]) > sari(src, out, [other])
+    assert sari_morpheme(src, out, [other, out]) > sari_morpheme(src, out, [other])
+    assert references({"src": "a", "references": ["b", "c"]}) == ["b", "c"]
+    assert references({"src": "a", "ref": "b"}) == ["b"] and references({"src": "a", "tgt": "t"}) == ["t"]
+
+
+def test_bert_score_groups_takes_best_reference(monkeypatch):
+    import sys, types
+    seen = {}
+
+    def fake_score(c, r, **k):
+        seen["pairs"] = list(zip(c, r))
+        return None, None, types.SimpleNamespace(tolist=lambda: [0.2, 0.9, 0.5])
+    monkeypatch.setitem(sys.modules, "bert_score", types.SimpleNamespace(score=fake_score))
+    from training.evaluate import bert_score_groups
+    got = bert_score_groups({"model": (["o1", "o2"], [["r1", "r2"], "r3"])})
+    assert seen["pairs"] == [("o1", "r1"), ("o1", "r2"), ("o2", "r3")]
+    assert got == {"model": round((0.9 + 0.5) / 2, 4)}

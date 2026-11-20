@@ -1,7 +1,12 @@
 """Regenerate a model's parity fixtures using its current metadata decoding settings."""
 import argparse
 import json
+import sys
 from pathlib import Path
+
+# `python scripts/regenerate_parity.py`로 돌리면 sys.path[0]이 scripts/라서, 설치된 다른 체크아웃의 simple_word를
+# 불러올 수 있다(옛 숫자 검사로 parity를 만들어 게이트가 깨짐). 이 저장소 루트를 먼저 본다.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from simple_word.model import Simplifier
 from training.export import PARITY_INPUTS

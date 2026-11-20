@@ -15,9 +15,22 @@ def _ngrams(tokens, n):
     return [" ".join(tokens[i : i + n]) for i in range(len(tokens) - n + 1)]
 
 
-def _sari_ngram(s, c, r):
-    """Xu et al. 2016 SARI 한 n-gram 차수, 참조 1개. keep F1, delete 정밀도, add F1."""
-    sc, cc, rc = collections.Counter(s), collections.Counter(c), collections.Counter(r)
+def references(row):
+    """평가 행의 정답 목록. 새 형식은 references 리스트, 예전 형식은 tgt 또는 ref 한 개."""
+    if row.get("references"):
+        return list(row["references"])
+    return [row["tgt"] if "tgt" in row else row["ref"]]
+
+
+def _sari_ngram(s, c, rs):
+    """Xu et al. 2016 SARI 한 n-gram 차수. keep F1, delete 정밀도, add F1.
+    rs는 참조들의 n-gram 목록 리스트(문자열 하나면 참조 1개). 원 구현처럼 원문·출력 개수를 참조 수만큼 곱해 비교한다."""
+    if not rs or isinstance(rs[0], str):
+        rs = [rs]
+    k = len(rs)
+    rc = sum((collections.Counter(r) for r in rs), collections.Counter())
+    sc = collections.Counter({g: n * k for g, n in collections.Counter(s).items()})
+    cc = collections.Counter({g: n * k for g, n in collections.Counter(c).items()})
     keep, keep_good, keep_all = sc & cc, sc & cc & rc, sc & rc
     kp = sum(keep_good[g] / keep[g] for g in keep) / len(keep) if keep else 1
     kr = sum(keep_good.values()) / sum(keep_all.values()) if keep_all else 1  # easse 구현과 같음
@@ -32,10 +45,16 @@ def _sari_ngram(s, c, r):
     return f1(kp, kr), dp, f1(ap, ar)
 
 
-def sari(src, out, ref):
-    s, c, r = (TOKEN.findall(x) for x in (src, out, ref))
-    parts = [_sari_ngram(_ngrams(s, n), _ngrams(c, n), _ngrams(r, n)) for n in range(1, 5)]
+def _sari(tokenize, src, out, ref):
+    refs = [ref] if isinstance(ref, str) else list(ref)
+    s, c, rs = tokenize(src), tokenize(out), [tokenize(r) for r in refs]
+    parts = [_sari_ngram(_ngrams(s, n), _ngrams(c, n), [_ngrams(r, n) for r in rs]) for n in range(1, 5)]
     return sum(sum(p[i] for p in parts) / 4 for i in range(3)) / 3
+
+
+def sari(src, out, ref):
+    """어절 SARI. ref는 정답 하나(str) 또는 여러 개(list)."""
+    return _sari(TOKEN.findall, src, out, ref)
 
 
 PARTICLES = tuple(sorted(("으로부터", "에게서", "에서는", "까지는", "으로", "에서", "에게", "부터", "까지",
@@ -57,9 +76,7 @@ def morpheme_tokens(text):
 
 
 def sari_morpheme(src, out, ref):
-    s, c, r = (morpheme_tokens(x) for x in (src, out, ref))
-    parts = [_sari_ngram(_ngrams(s, n), _ngrams(c, n), _ngrams(r, n)) for n in range(1, 5)]
-    return sum(sum(p[i] for p in parts) / 4 for i in range(3)) / 3
+    return _sari(morpheme_tokens, src, out, ref)
 
 
 def text_metrics(srcs, outs, refs, preserve, nikl):
@@ -82,27 +99,34 @@ def text_metrics(srcs, outs, refs, preserve, nikl):
 def bert_score_groups(groups):
     from bert_score import score  # bert-base-multilingual-cased (lang="ko" 기본값)
 
-    names, cands, refs, spans = [], [], [], {}
+    # targets의 한 칸이 정답 목록(list)이면 정답마다 F1을 내고 그중 최대를 그 문장 점수로 쓴다.
+    cands, refs, owners, spans = [], [], [], {}
+    sentence = 0
     for name, (candidates, targets) in groups.items():
         if candidates:
-            start = len(cands)
-            names.append(name)
-            spans[name] = (start, start + len(candidates))
-            cands.extend(candidates)
-            refs.extend(targets)
+            first = sentence
+            for cand, target in zip(candidates, targets):
+                for ref in ([target] if isinstance(target, str) else target):
+                    cands.append(cand)
+                    refs.append(ref)
+                    owners.append(sentence)
+                sentence += 1
+            spans[name] = (first, sentence)
     values = score(cands, refs, lang="ko", verbose=False)[2].tolist()
-    return {name: round(statistics.mean(values[start:end]), 4) for name, (start, end) in spans.items()}
+    best = {}
+    for owner, value in zip(owners, values):
+        best[owner] = max(best.get(owner, value), value)
+    return {name: round(statistics.mean(best[i] for i in range(start, end)), 4) for name, (start, end) in spans.items()}
 
 
 def _reference_diagnostics(rows, test_path):
-    srcs, refs = [r["src"] for r in rows], [r.get("ref", r.get("tgt", "")) for r in rows]
+    srcs, refs = [r["src"] for r in rows], [references(r) for r in rows]
     candidates_path = Path(test_path).with_name("candidates.jsonl")
     candidates = {}
     if candidates_path.is_file():
         candidates = {r["id"]: r.get("teacher", "") for r in
                       (json.loads(line) for line in candidates_path.read_text(encoding="utf-8").splitlines() if line)}
-    teacher_rows = [(r["src"], r.get("teacher") or candidates.get(r.get("id"), ""), r.get("ref", r.get("tgt", "")))
-                    for r in rows]
+    teacher_rows = [(r["src"], r.get("teacher") or candidates.get(r.get("id"), ""), references(r)) for r in rows]
     teacher_rows = [(s, t, ref) for s, t, ref in teacher_rows if t]
 
     source = {"count": len(srcs),
@@ -158,7 +182,7 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     rows = [json.loads(l) for l in test_path.read_text(encoding="utf-8").splitlines() if l]
     if not rows:
         raise ValueError(f"{test_path}: evaluation set is empty")
-    srcs, refs = [r["src"] for r in rows], [r["tgt"] if "tgt" in r else r["ref"] for r in rows]
+    srcs, refs = [r["src"] for r in rows], [references(r) for r in rows]
     simp, outs, ms = Simplifier(str(model_dir)), [], []
     if simp.dummy or not all(_is_int8(model_dir / f) for f in ("encoder.onnx", "decoder.onnx")):
         raise ValueError(f"{model_dir}: INT8 ONNX 모델이 아니다. 게이트 지표는 서빙과 같은 INT8 ONNX로만 계산한다")
@@ -172,7 +196,7 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     m = text_metrics(srcs, outs, refs, preserve_terms(), nikl_dict(data_dir))
     bert_groups = {"output_ref": (outs, refs), "output_source": (outs, srcs)}
     diagnostics = None
-    if all("ref" in row for row in rows):
+    if all("ref" in row or "references" in row for row in rows):
         diagnostics, reference_groups = _reference_diagnostics(rows, test_path)
         bert_groups.update({f"diagnostics_{name}": pair for name, pair in reference_groups.items()})
     if with_bert:
@@ -190,7 +214,7 @@ def evaluate(version, test_path, model_root="models", data_dir="data", with_bert
     m["test_set_sha1"] = eval_set_sha1
     if diagnostics is not None:
         m["diagnostics"] = diagnostics
-    lines = "".join(json.dumps({"src": s, "out": o, "ref": r, "fallback": f}, ensure_ascii=False) + "\n"
+    lines = "".join(json.dumps({"src": s, "out": o, "ref": r[0], "references": r, "fallback": f}, ensure_ascii=False) + "\n"
                     for s, o, r, f in zip(srcs, outs, refs, fallbacks))
     if out:
         out = Path(out)
