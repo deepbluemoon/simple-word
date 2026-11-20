@@ -46,3 +46,4 @@
 | T20 (#70) | 보안 보강 후속: PDF 격리, 프록시 설정 복구, 오류 응답·피드백 보호 | Codex | doing (`codex/security-fixes`) |
 | T21 (#72) | Lightsail TLS·갱신 훅·Compose 설정 리뷰 수정 | Codex | queued after #70 |
 | T22 (#66) | 배포 검증 경로·롤링 복구 검사 리뷰 수정 | Codex | queued after #72 |
+| T23 (#73) | GCP 예산·Artifact Registry·모델 버킷·서비스 계정·GitHub WIF·배포 스크립트 | Codex | review (main rebase 및 리뷰 수정 진행 중) |
