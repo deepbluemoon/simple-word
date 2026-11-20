@@ -1,5 +1,23 @@
 # 배포
 
+## Lightsail 호스트 준비와 HTTPS
+
+호스트 초기화는 서비스 이미지를 올리지 않고 실행한다. 스크립트는 Docker Engine·Compose 플러그인, unattended-upgrades, fail2ban, UFW, 2 GiB 스왑, Sydney 시간·NTP, 로그 제한과 `/srv/simple-word/{models,logs}`를 설정한다. SSH 비밀번호 인증을 끄기 전에 배포 사용자의 `authorized_keys`가 있는지 확인한다.
+
+```sh
+ssh eta 'sudo bash -s' < deploy/bootstrap-lightsail.sh
+```
+
+HTTPS는 Lightsail 전용 Compose override에서만 켠다. 기본 `deploy/compose.yaml`과 `test-local.sh`는 HTTP만 사용한다. bootstrap은 Certbot standalone으로 인증서를 발급하고 `certbot.timer`를 활성화한다. 이메일을 등록하지 않으므로 만료 알림 메일은 없다. 자동 갱신 때는 `simpleword-proxy-1`을 잠시 멈춰 80번 포트를 비운 뒤 다시 시작한다. 인증서가 아직 없다는 이유로 서비스를 미리 배포하지 않는다. 초기 발급이 실패하면 Lightsail 방화벽에서도 TCP 80이 열려 있는지 확인하고 스크립트를 다시 실행한다.
+
+인증서를 발급한 뒤 다음 단계에서 운영 서비스를 시작할 때는 프로젝트 이름 `simpleword`를 유지해야 갱신 훅이 프록시를 찾는다.
+
+```sh
+IMAGE=ghcr.io/OWNER/simple-word:VERSION HOST_PORT=80 docker compose -p simpleword -f deploy/compose.yaml -f deploy/compose.lightsail.yaml up -d --wait api-1 api-2 proxy
+```
+
+Lightsail override는 443을 열고 HTTP 요청을 HTTPS로 308 리다이렉트한다. 인증서 경로는 `NGINX_TLS_FULLCHAIN`, `NGINX_TLS_PRIVKEY` 환경변수로 바꿀 수 있다. 실제 이미지·모델 배포는 별도 승인된 배포 단계에서 한다.
+
 ## Lightsail
 
 Lightsail은 현재 champion만 실행한다. nginx 뒤에 같은 이미지와 모델을 쓰는 `api-1`, `api-2`가 있고, nginx가 두 upstream에 부하를 나눈다. 연결·타임아웃·502·503·504 실패는 다른 upstream으로 재시도한다. Lightsail에는 카나리, 섀도, 오토스케일링이 없다.

@@ -82,10 +82,15 @@
 - PR #70 `codex/security-fixes`는 `47f97b9`로 병합됐다.
 - PR #73 `codex/gcp-setup`은 main에 병합됐다.
 - PR #81 `codex/drop-pdf`는 병합됐다.
-- PR #72는 codex2가 #70 후속 보완과 함께 진행한다. Codex는 현재 `codex/deploy-check-paths`에서 #66 rebase·리뷰 수정·검증을 처리한다.
+- PR #72 `codex/lightsail-bootstrap`은 #70 프록시 롤백 보완과 #66 모델 버전 smoke를 포함해 Caddy로 전환 중이다.
 - #66과 #82는 병합됐다. PR #74 `codex/nbest-fixes`는 rebase 후 전체 테스트를 통과했다. PR 병합은 총괄이 한다.
 
 ## PR #74 n-best 후속 수정
 - `simple_word/model.py`는 폭 1의 greedy와 beam 탐색을 같은 경로에서 처리하고, beam 후보를 전역 점수로 순위화한다. 빈 출력·너무 짧은 beam 결과와 무효 logits는 원문 fallback으로 처리한다.
 - `training/export.py`와 parity 스크립트는 dynamic beam 축을 export하고, FP32 reference와 비교한 뒤 ONNX 출력으로 parity fixture를 기록한다. 저장소 밖에서 실행하는 benchmark/parity 스크립트의 import 경로도 고쳤다.
 - `.venv/bin/python -m pytest -q`: 146 passed. 임시 소형 KoBART로 greedy·beam 결과를 Hugging Face generate와 비교한다. 실제 v2 ONNX(20개 parity 입력 × 3회)에서 기준 브랜치 p95/RSS는 93.4ms/359.6MiB, 현재 폭 1 경로는 92.3ms/295.6MiB였다. metadata의 모델 메모리는 272.1MB(300MB의 91%)로 기록되어 있으나, 전체 Python 프로세스 peak RSS는 295.6MiB(한도의 98.5%)라 여유가 약 4.4MiB다.
+
+## PR #72 Lightsail Caddy HTTPS
+- #66(`c8c5dc4`) 위로 rebase한 뒤 #74·#82도 반영한다. 외부 80/443은 Caddy만 게시하고 nginx는 내부 HTTP로 둔다. nginx는 Caddy edge 네트워크의 X-Forwarded-For만 신뢰한다.
+- Caddy의 `/data`와 `/config`는 named volume이며, access JSON 로그는 10 MiB×5개 순환 보관한다. blocklist 변경은 관리 스크립트로 nginx 검사·reload를 거친다.
+- 아직 Lightsail 실배포는 하지 않는다.
