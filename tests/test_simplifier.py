@@ -33,6 +33,7 @@ def test_onnx_greedy_matches_torch_greedy(tmp_path):
         assert got == tok.decode(gen[0], skip_special_tokens=True).strip()
     assert simp.simplify(texts) == simp.simplify(texts)
     assert Path(tmp_path / "models/t/parity.jsonl").read_text().count("\n") == 20 and meta["version"] == "t"
+    assert meta["decoding"]["num_beams"] == 1
 
 
 def test_input_over_255_tokens_is_returned_unchanged():
@@ -86,3 +87,42 @@ def test_simplifier_explains_number_term_and_length_fallbacks():
         ("아주 긴 문장입니다.", True, "length"),
     ]
     assert simp.simplify_detailed(list(outputs)) == [(text, fallback) for text, fallback, _ in explained]
+
+
+def test_beam_uses_next_candidate_when_top_candidate_fails_number_guard(monkeypatch):
+    import numpy as np
+
+    class Tok:
+        def encode(self, _text, add_special_tokens=False):
+            return type("E", (), {"ids": [7]})()
+
+        def decode(self, ids, skip_special_tokens=True):
+            return {2: "2일 이내에 접수합니다.", 3: "20일 이내에 접수합니다."}.get(ids[0], "")
+
+    class Encoder:
+        def run(self, _outputs, _inputs):
+            return [np.zeros((1, 1, 1, 1), dtype=np.float32)]
+
+        def get_outputs(self):
+            return [type("O", (), {"name": "cross_k"})()]
+
+    class Decoder:
+        def get_inputs(self):
+            return [type("I", (), {"name": "cross_k"})()]
+
+        def run(self, _outputs, inputs):
+            logits = np.full((1, 1, 8), -30.0)
+            if inputs["position_ids"][0, 0] == 0:
+                logits[0, 0, 2], logits[0, 0, 3] = 5.0, 4.0
+            else:
+                logits[0, 0, 1] = 5.0
+            return [logits]
+
+    simp = Simplifier.__new__(Simplifier)
+    simp.dummy, simp.tok, simp.encoder, simp.decoder = False, Tok(), Encoder(), Decoder()
+    simp.placeholders, simp.num_beams = False, 2
+    monkeypatch.setattr("simple_word.model.preserve_terms", lambda: [])
+
+    assert simp.simplify_explained(["20일 이내에 접수합니다."]) == [
+        ("20일 이내에 접수합니다.", False, None)
+    ]
