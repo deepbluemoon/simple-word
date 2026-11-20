@@ -25,3 +25,17 @@ def test_make_splits_excludes_flagged_only_from_train(tmp_path):
     cut = make_splits([pairs], tmp_path / "b", exclude=load_flags(nli))
     assert base["train"] and not cut["train"]
     assert cut["valid"] == base["valid"] and cut["test"] == base["test"]
+
+
+def test_llm_parse_exclude_and_load_flags_prefers_exclude(tmp_path):
+    from training.nli_llm import exclude, parse
+    assert parse('{"differences": ["a → b: 다름"], "verdict": "omission"}') == {"verdict": "omission", "reason": "a → b: 다름"}
+    assert parse("앞말 {\"verdict\": \"SAME\"} 뒷말")["verdict"] == "same"
+    assert parse("엉망")["verdict"] == "unknown" and not exclude({"verdict": "unknown"})
+    assert exclude({"verdict": "contradiction"}) and not exclude({"verdict": "same"})
+    p = tmp_path / "nli.jsonl"
+    rows = [{"doc_id": "a", "idx": 0, "flag": "omission", "exclude": False},
+            {"doc_id": "b", "idx": 0, "flag": "contradiction", "exclude": True},
+            {"doc_id": "c", "idx": 0, "flag": "omission"}]
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    assert load_flags(p) == {("b", 0), ("c", 0)}

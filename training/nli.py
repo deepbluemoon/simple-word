@@ -27,8 +27,9 @@ def flag(r, contradiction=CONTRADICTION, omission=OMISSION):
 
 
 def load_flags(path):
-    """data/nli.jsonl → 걸러낼 짝의 (doc_id, idx) 집합."""
-    return {(r["doc_id"], r["idx"]) for r in map(json.loads, open(path, encoding="utf-8")) if r.get("flag")}
+    """data/nli.jsonl → 걸러낼 짝의 (doc_id, idx) 집합. exclude(training.nli_llm 재판정)가 있으면 그것을, 없으면 flag를 쓴다."""
+    return {(r["doc_id"], r["idx"]) for r in map(json.loads, open(path, encoding="utf-8"))
+            if (r["exclude"] if "exclude" in r else r.get("flag"))}
 
 
 def judge(pairs, batch=32, device=None):
