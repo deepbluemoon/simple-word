@@ -39,6 +39,12 @@ services:
       dockerfile: deploy/proxy.Dockerfile
     ports:
       - "${HOST_PORT:-8000}:80"
+    environment:
+      NGINX_SIMPLIFY_RATE: ${NGINX_SIMPLIFY_RATE:-10r/m}
+      NGINX_SIMPLIFY_BURST: ${NGINX_SIMPLIFY_BURST:-5}
+      NGINX_FEEDBACK_RATE: ${NGINX_FEEDBACK_RATE:-30r/m}
+      NGINX_FEEDBACK_BURST: ${NGINX_FEEDBACK_BURST:-10}
+      NGINX_CONNECTIONS_PER_IP: ${NGINX_CONNECTIONS_PER_IP:-20}
     depends_on:
       api-1:
         condition: service_healthy
