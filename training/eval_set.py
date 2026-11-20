@@ -30,7 +30,7 @@ def has_term(terms, s):
 
 
 def features(src, nikl, keep):
-    return {"numbers": sorted(value for value, _, _ in numbers(src).elements()), "difficult": has_term(nikl, src),
+    return {"numbers": sorted(numbers(src)), "difficult": has_term(nikl, src),
             "preserve": has_term(keep, src), "long": len(src) >= LONG}
 
 
