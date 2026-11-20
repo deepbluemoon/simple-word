@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('CSP allows Vue scripts and dynamic inline styles', async ({ page }) => {
-  const policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; connect-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net"
+test('nginx CSP allows the built Vue app and its styles', async ({ page }) => {
   await page.addInitScript(() => {
     window.addEventListener('securitypolicyviolation', (event) => {
       const root = document.documentElement
@@ -9,21 +8,21 @@ test('CSP allows Vue scripts and dynamic inline styles', async ({ page }) => {
       root.setAttribute('data-csp-violations', `${previous}${event.violatedDirective}:${event.blockedURI};`)
     })
   })
-  await page.route('**/', async (route) => {
-    if (new URL(route.request().url()).pathname !== '/') return route.continue()
-    const response = await route.fetch()
-    await route.fulfill({ response, headers: { ...response.headers(), 'content-security-policy': policy } })
-  })
+  let finishRequest!: () => void
+  const pendingResponse = new Promise<void>((resolve) => { finishRequest = resolve })
   await page.route('**/simplify', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await route.continue()
+    await pendingResponse
+    await route.fulfill({ json: { model_version: 'e2e', sentences: [{ original: '안내 문장입니다.', simple: '안내 문장입니다.', fallback: false, paragraph_id: 0 }] } })
   })
   const response = await page.goto('/')
-  expect(response?.headers()['content-security-policy']).toBe(policy)
+  const policy = response?.headers()['content-security-policy'] ?? ''
+  expect(policy).toContain("default-src 'self'")
+  expect(policy).toContain("style-src 'self'")
   await page.getByRole('button', { name: '글 붙여넣기' }).click()
   await page.getByRole('textbox', { name: '쉬운 말로 바꿀 공문서 내용' }).fill('안내 문장입니다.')
   await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
   await expect(page.getByRole('progressbar', { name: '문서 처리 진행률' })).toBeVisible()
+  finishRequest()
   await expect(page.getByRole('heading', { name: '쉬운 말로 바꾼 결과' })).toBeVisible()
   expect(await page.locator('html').getAttribute('data-csp-violations')).toBeNull()
 })

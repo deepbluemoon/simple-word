@@ -33,6 +33,11 @@ describe('Simple Word API', () => {
     await expect(simplify(new File(['x'], 'x.txt'))).rejects.toMatchObject({ status, message: expect.stringContaining(message) })
   })
 
+  it.each([[408, 'PDF를 읽는 데 시간이 오래 걸렸어요'], [413, '파일은 5MB 이하여야 해요'], [503, 'PDF를 처리할 수 없어요']])('explains upload failure %i', async (status, message) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<html>proxy error</html>', { status }))
+    await expect(simplify(new File(['x'], 'x.pdf'))).rejects.toMatchObject({ status, message: expect.stringContaining(message) })
+  })
+
   it('explains the 100-sentence limit in Korean', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ detail: 'Document exceeds 100-sentence limit' }), { status: 400 }))
     await expect(simplify(new File(['x'], 'x.txt'))).rejects.toMatchObject({ message: expect.stringContaining('100문장') })

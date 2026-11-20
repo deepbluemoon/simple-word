@@ -17,6 +17,7 @@ def test_teacher_prompt_has_terms_and_rerun_skips_done(tmp_path):
     assert "거버넌스 → 협치/관리" in prompts[0] and "영어 단어·약어는 그대로 씁니다: AI" in prompts[0]
     [pair] = [json.loads(l) for l in (tmp_path / "pairs.jsonl").open(encoding="utf-8")]
     assert pair["teacher"] == "ollama:gemma3:27b" and pair["passed"] is True
+    assert pair["prompt"] == "v3-injection-guard"
 
 
 def test_teacher_prompt_marks_source_as_untrusted_and_checks_injected_output():

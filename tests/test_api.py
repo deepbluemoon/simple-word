@@ -104,8 +104,8 @@ def test_simplify_times_out_pdf_parsing(monkeypatch):
 
     response = client.post("/simplify", files={"file": ("slow.pdf", buffer.getvalue())})
 
-    assert response.status_code == 408
-    assert "timed out" in response.json()["detail"]
+    assert response.status_code == 503
+    assert "too long" in response.json()["detail"]
 
 
 def test_simplify_accepts_valid_pdf():
@@ -117,6 +117,40 @@ def test_simplify_accepts_valid_pdf():
     response = client.post("/simplify", files={"file": ("notice.pdf", buffer.getvalue())})
 
     assert response.status_code == 200
+
+
+def test_simplify_keeps_pypdf_error_message_for_malformed_pdf():
+    response = client.post("/simplify", files={"file": ("broken.pdf", b"not a PDF")})
+
+    assert response.status_code == 400
+    assert "Invalid PDF file" in response.json()["detail"]
+    assert "Stream has ended unexpectedly" in response.json()["detail"]
+
+
+def test_pdf_worker_eof_is_logged_and_returns_500(monkeypatch, caplog):
+    class Connection:
+        def poll(self, _timeout): return True
+        def recv(self): raise EOFError("worker pipe closed")
+        def close(self): pass
+
+    class Process:
+        pid = None
+        def start(self): pass
+        def is_alive(self): return False
+
+    class Context:
+        def Pipe(self, duplex=False): return Connection(), Connection()
+        def Process(self, target, args): return Process()
+
+    def fake_context(method):
+        assert method == "forkserver"
+        return Context()
+
+    monkeypatch.setattr(api_main.multiprocessing, "get_context", fake_context)
+    response = client.post("/simplify", files={"file": ("crashed.pdf", b"%PDF-data")})
+
+    assert response.status_code == 500
+    assert "PDF worker exited without returning a result" in caplog.text
 
 
 def test_simplify_rejects_empty_and_oversized_files():

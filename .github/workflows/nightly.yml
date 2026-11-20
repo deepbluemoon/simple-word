@@ -14,6 +14,8 @@ jobs:
       MODEL_DIR: ${{ github.workspace }}/.tmp/simpleword-e2e-models
       IMAGE: simple-word:e2e
       PROXY_IMAGE: simple-word-proxy:e2e
+      E2E_BASE_URL: http://127.0.0.1:8000
+      E2E_NO_SERVER: "1"
       MAX_CONCURRENT_SIMPLIFY: "100"
       NGINX_SIMPLIFY_RATE: "1000r/s"
       NGINX_SIMPLIFY_BURST: "1000"
@@ -106,6 +108,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Verify production IP rate limit returns 429
         shell: bash
         run: |
@@ -115,9 +120,13 @@ jobs:
           export HOST_PORT=18017 MODEL_DIR="$GITHUB_WORKSPACE/.tmp/nightly-rate/models" MAX_CONCURRENT_SIMPLIFY=100
           compose=(docker compose -p "$project" -f deploy/compose.yaml)
           cleanup() {
-            env -u NGINX_SIMPLIFY_RATE -u NGINX_SIMPLIFY_BURST -u NGINX_FEEDBACK_RATE -u NGINX_FEEDBACK_BURST -u NGINX_CONNECTIONS_PER_IP "${compose[@]}" down -v --remove-orphans || true
+            "${compose[@]}" down -v --remove-orphans || true
             rm -rf .tmp/nightly-rate
           }
           trap cleanup EXIT
-          env -u NGINX_SIMPLIFY_RATE -u NGINX_SIMPLIFY_BURST -u NGINX_FEEDBACK_RATE -u NGINX_FEEDBACK_BURST -u NGINX_CONNECTIONS_PER_IP "${compose[@]}" up -d --build --wait --wait-timeout 180 api-1 api-2 proxy
+          "${compose[@]}" up -d --build --wait --wait-timeout 180 api-1 api-2 proxy
           python scripts/load.py --url http://127.0.0.1:18017/simplify --requests 20 --concurrency 10 --min-429-rate 0.1
+          printf '간단한 요청입니다.\n' > .tmp/nightly-rate/request.txt
+          status="$(curl --silent --show-error -D .tmp/nightly-rate/headers -o .tmp/nightly-rate/body -w '%{http_code}' -F 'file=@.tmp/nightly-rate/request.txt;type=text/plain' http://127.0.0.1:18017/simplify)"
+          test "$status" = 429
+          python -c "import json,pathlib; headers=pathlib.Path('.tmp/nightly-rate/headers').read_text().lower(); body=json.loads(pathlib.Path('.tmp/nightly-rate/body').read_text()); assert 'retry-after: 1' in headers and body.get('detail')"

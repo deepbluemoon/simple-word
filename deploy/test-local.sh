@@ -5,7 +5,9 @@ REPO_ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 DEPLOY_DIR="$REPO_ROOT/deploy"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-rolling.XXXXXX")"
 COMPOSE_PROJECT_NAME="rolling-test-${$}"
-GOOD_IMAGE=simple-word:qa-codex
+GOOD_IMAGE="${IMAGE:-simple-word:qa-codex}"
+IMAGE_PROVIDED=0
+[[ -n "${IMAGE:-}" ]] && IMAGE_PROVIDED=1
 BROKEN_IMAGE="simple-word:qa-broken-${$}"
 PROXY_IMAGE="simple-word-proxy:qa-${$}"
 HOST_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
@@ -19,12 +21,14 @@ unset DEPLOY_USER DOCKER_HOST WEIGHT_HOOK WEIGHT_HOOK_WAIT
 compose() { docker compose --project-name "$COMPOSE_PROJECT_NAME" --file "$DEPLOY_DIR/compose.yaml" "$@"; }
 cleanup() {
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
-    docker image rm "$GOOD_IMAGE" "$BROKEN_IMAGE" "$PROXY_IMAGE" >/dev/null 2>&1 || true
+    docker image rm "$BROKEN_IMAGE" "$PROXY_IMAGE" >/dev/null 2>&1 || true
+    (( IMAGE_PROVIDED )) || docker image rm "$GOOD_IMAGE" >/dev/null 2>&1 || true
     rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
 
-IMAGE="$GOOD_IMAGE" compose build api-1 api-2
+if (( IMAGE_PROVIDED )); then docker image inspect "$GOOD_IMAGE" >/dev/null 2>&1 || docker pull "$GOOD_IMAGE"; else IMAGE="$GOOD_IMAGE" compose build api-1 api-2; fi
+export IMAGE="$GOOD_IMAGE"
 compose build proxy
 IMAGE="$GOOD_IMAGE" compose up -d --no-build --wait --wait-timeout 180 api-1 api-2 proxy
 python3 "$REPO_ROOT/scripts/smoke.py" "http://127.0.0.1:$HOST_PORT"

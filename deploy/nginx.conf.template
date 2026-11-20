@@ -17,6 +17,7 @@ server {
     client_body_timeout 15s;
     send_timeout 30s;
     limit_conn connections_per_ip ${NGINX_CONNECTIONS_PER_IP};
+    error_page 429 = @rate_limited;
 
     add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; connect-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net" always;
     add_header X-Content-Type-Options "nosniff" always;
@@ -45,6 +46,16 @@ server {
         proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_next_upstream_tries 2;
         proxy_pass http://api_backend;
+    }
+
+    location @rate_limited {
+        default_type application/json;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; connect-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Retry-After 1 always;
+        return 429 '{"detail":"요청이 많아 잠시 기다리고 있어요. 조금 뒤 다시 시도해 주세요."}';
     }
 
     location / {

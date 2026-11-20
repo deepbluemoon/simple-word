@@ -45,6 +45,8 @@ if [[ -n "${WEIGHT_HOOK:-}" ]]; then
     sleep "${WEIGHT_HOOK_WAIT:-30}"
 fi
 
+bash "$DEPLOY_DIR/update-proxy.sh"
+
 for service in api-1 api-2; do
     changed+=("$service")
     IMAGE="$IMAGE" compose up -d --no-deps --no-build --pull missing "$service"

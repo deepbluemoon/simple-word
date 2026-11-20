@@ -1,6 +1,6 @@
 """자동 학습 파이프라인 (이슈 #8): 수집 → 전처리 → 교사 생성 → 검사 → (새 통과 짝이 충분하면) 학습 → export → evaluate → 게이트 → 후보 등록.
 
-feedback.jsonl은 자동 입력으로 쓰지 않는다. 사람과 총괄이 검토·승인한 뒤에만 별도 선별 절차로 학습 데이터에 반영한다.
+피드백 파일은 어느 자동 단계도 읽지 않는다. 사람과 총괄이 승인한 항목을 수동으로 선별할 때만 data/feedback_approved.jsonl을 입력으로 삼는다.
 
     python -m training.pipeline --data-only     # 매일: 수집~검사까지만
     python -m training.pipeline                 # 주 1회: 통과 짝이 직전 학습보다 --min-new-pairs 건 이상 늘었으면 학습까지
@@ -118,9 +118,7 @@ def _collect(ctx):
 
 
 def _feedback_review_guard(ctx):
-    feedback = ctx.data_dir / "feedback.jsonl"
-    if feedback.exists() and feedback.stat().st_size:
-        raise ValueError("feedback.jsonl requires human and project-lead review before data import")
+    # Feedback is deliberately outside the automatic pipeline; approved items require a separate manual import.
     return {"feedback_imported": False}
 
 

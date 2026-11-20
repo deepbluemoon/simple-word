@@ -22,6 +22,7 @@ from starlette.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from api.router import ModelRouter
+from api.pdf_worker import extract_pdf_worker
 
 app = FastAPI()
 LOG_DIR = Path(os.getenv("LOG_DIR", "./logs"))
@@ -69,42 +70,34 @@ def xml_paragraph_text(data: bytes) -> str:
     return "\n\n".join(paragraphs)
 
 
-def _extract_pdf_worker(data: bytes, connection) -> None:
-    try:
-        from pypdf import PdfReader
-
-        reader = PdfReader(io.BytesIO(data))
-        if len(reader.pages) > MAX_PDF_PAGES:
-            connection.send((False, "page_limit"))
-            return
-        connection.send((True, "\n".join(page.extract_text() or "" for page in reader.pages)))
-    except BaseException as exc:
-        connection.send((False, type(exc).__name__))
-    finally:
-        connection.close()
-
-
 def extract_pdf_text(data: bytes) -> str:
-    context = multiprocessing.get_context("spawn")
+    context = multiprocessing.get_context("forkserver")
     receive, send = context.Pipe(duplex=False)
-    process = context.Process(target=_extract_pdf_worker, args=(data, send))
-    process.start()
-    send.close()
+    process = context.Process(target=extract_pdf_worker, args=(data, send, MAX_PDF_PAGES))
     try:
+        process.start()
+        send.close()
         if not receive.poll(PDF_PARSE_TIMEOUT_SECONDS):
             raise TimeoutError("PDF parsing timed out")
-        ok, result = receive.recv()
+        try:
+            ok, result = receive.recv()
+        except EOFError as exc:
+            logger.exception("PDF worker exited without returning a result")
+            raise RuntimeError("PDF worker exited without returning a result") from exc
         if not ok:
             if result == "page_limit":
                 raise HTTPException(status_code=400, detail="PDF exceeds 50-page limit")
             raise ValueError(f"PDF parsing failed ({result})")
         return result
     finally:
+        if send:
+            send.close()
         receive.close()
-        process.join(timeout=0.2)
-        if process.is_alive():
-            process.terminate()
-            process.join()
+        if process.pid is not None:
+            process.join(timeout=0.2)
+            if process.is_alive():
+                process.terminate()
+                process.join()
 
 
 def extract_text(filename: str, data: bytes) -> str:
@@ -130,12 +123,13 @@ def extract_text(filename: str, data: bytes) -> str:
     except HTTPException:
         raise
     except TimeoutError as exc:
-        raise HTTPException(status_code=408, detail="PDF parsing timed out") from exc
+        raise HTTPException(status_code=503, detail="PDF parsing took too long; try a smaller or simpler PDF") from exc
     except (UnicodeDecodeError, zipfile.BadZipFile, KeyError, ElementTree.ParseError, DefusedXmlException, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid {suffix[1:].upper()} file: {exc}") from exc
     except Exception as exc:
         if suffix == ".pdf":
-            raise HTTPException(status_code=400, detail=f"Invalid PDF file: {exc}") from exc
+            logger.exception("PDF processing failed")
+            raise HTTPException(status_code=500, detail="PDF processing failed") from exc
         raise
     raise HTTPException(status_code=400, detail="Supported files: .txt, .docx, .hwpx, .pdf")
 
