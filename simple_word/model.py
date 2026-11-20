@@ -38,7 +38,7 @@ class Simplifier:
         try:
             self.num_beams = int(json.loads((self.artifact_dir / "metadata.json").read_text(encoding="utf-8"))
                                  .get("decoding", {}).get("num_beams", 1))
-        except (OSError, ValueError):
+        except (OSError, TypeError, ValueError):
             self.num_beams = 1
         if self.num_beams < 1:
             raise ValueError("metadata decoding.num_beams must be at least 1")
@@ -171,7 +171,11 @@ class Simplifier:
                     row[banned] = -np.inf
                     if force and need - set(tokens):
                         row[EOS] = -np.inf
-                token_ids = np.argsort(row)[-width:][::-1]
+                beam_width = min(width, row.size)
+                cutoff = np.partition(row, -beam_width)[-beam_width]
+                token_ids = np.flatnonzero(row > cutoff)
+                ties = np.flatnonzero(row == cutoff)[:beam_width - len(token_ids)]
+                token_ids = sorted(np.concatenate((token_ids, ties)), key=lambda token: (-row[token], token))
                 for token in token_ids:
                     candidate = (tokens + [int(token)], score + float(row[token]), next_past)
                     if token == EOS:
