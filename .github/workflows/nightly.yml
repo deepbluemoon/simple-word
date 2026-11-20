@@ -6,6 +6,54 @@ on:
   workflow_dispatch:
 
 jobs:
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HOST_PORT: "8000"
+      MODEL_DIR: ${{ github.workspace }}/.tmp/simpleword-e2e-models
+      IMAGE: simple-word:e2e
+      PROXY_IMAGE: simple-word-proxy:e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
+      - name: Install frontend and browser dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Start isolated compose service
+        env:
+          PROJECT: simpleword-e2e-${{ github.run_id }}
+        run: |
+          mkdir -p "$MODEL_DIR"
+          docker compose -p "$PROJECT" -f deploy/compose.yaml up -d --build --wait --wait-timeout 180 api-1 api-2 proxy
+      - name: Run Playwright E2E
+        working-directory: frontend
+        run: npm run e2e
+      - name: Upload Playwright traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failures-${{ github.run_id }}
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Stop isolated compose service
+        if: always()
+        env:
+          PROJECT: simpleword-e2e-${{ github.run_id }}
+        run: docker compose -p "$PROJECT" -f deploy/compose.yaml down -v --remove-orphans
+
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -43,3 +43,60 @@ test('accepts pasted text and keeps reading controls usable at 400px', async ({ 
   await expect(page.getByRole('button', { name: '글자 크게' })).toHaveAttribute('aria-pressed', 'true')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
+
+test('shows a retry countdown after 429 and retries successfully', async ({ page }) => {
+  let attempts = 0
+  await page.route('**/simplify', async (route) => {
+    attempts++
+    if (attempts === 1) {
+      await route.fulfill({ status: 429, headers: { 'Retry-After': '3' }, body: 'busy' })
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ model_version: 'dummy', sentences: [{ original: '신청 안내입니다.', simple: '신청 안내입니다.', fallback: false }] }),
+    })
+  })
+  await page.goto('/')
+  await page.locator('input[type=file]').setInputFiles({
+    name: '안내.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('신청 안내입니다.'),
+  })
+  await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
+  await expect(page.getByRole('status').filter({ hasText: '3초 뒤 자동으로 다시 시도해요.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '쉬운 말로 바꾼 결과' })).toBeVisible({ timeout: 10_000 })
+  expect(attempts).toBe(2)
+})
+
+test('explains the 5 MB file limit', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('input[type=file]').setInputFiles({
+    name: '큰 안내.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.alloc(5 * 1024 * 1024 + 1, 65),
+  })
+  await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
+  await expect(page.getByRole('alert')).toHaveText('파일은 5MB 이하여야 해요.')
+})
+
+test('explains unsupported file types', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('input[type=file]').setInputFiles({
+    name: '안내.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('not a supported document'),
+  })
+  await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
+  await expect(page.getByRole('alert')).toHaveText('TXT, DOCX, HWPX, PDF 파일을 올려 주세요.')
+})
+
+test('explains the 100-sentence limit', async ({ page }) => {
+  const sentences = Array.from({ length: 101 }, (_, index) => `안내 문장 ${index + 1}입니다.`).join('\n')
+  await page.goto('/')
+  await page.getByRole('button', { name: '글 붙여넣기' }).click()
+  await page.getByRole('textbox', { name: '쉬운 말로 바꿀 공문서 내용' }).fill(sentences)
+  await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
+  await expect(page.getByRole('alert')).toHaveText('공문서는 한 번에 100문장까지 바꿀 수 있어요. 파일을 나눠서 올려 주세요.')
+})
