@@ -264,7 +264,18 @@
 - deploy volume/mount·gen2·min/max 플래그를 교정했다. setup 재실행은 버킷 공개 방지와 owner ID 제한 WIF를 재적용하고 deployer 읽기 권한을 보장한다. 예산 전용 실행으로 이번 검증 중 배포 버킷은 건드리지 않았다.
 - 리뷰 후속 수정: 재실행 시 기존 버킷 lifecycle 중 `staging/` 정리 규칙만 교체하고 나머지는 보존한다. Cloud Run 환경 변수는 `--update-env-vars`로 갱신한다. 공개 배포를 위해 deployer에 `run.services.setIamPolicy` 하나만 포함한 프로젝트 커스텀 역할을 추가했다(프로젝트 내 Cloud Run 서비스 IAM 변경 가능). pytest 118 passed, 1 skipped; bash 구문 검사 통과. GCP 리소스 변경은 수행하지 않았다.
 
+## 61. 3차 1일차 (2026-11-22)
+- 병합: 보안 후속(#70), GCP 설정 스크립트(#73), PDF 업로드 제거(#81), 배포 검증 시점 변경(#66), 예시 파일 TXT·DOCX·HWPX + 제목 원문 유지(#82), n-best 빔·parity 수정(#74). #62(v3-ph 조사 교정)는 v3-base를 후보로 정해 닫음.
+- 사용자 결정:
+  - PDF는 받지 않는다(415, 화면에서도 안내). 제목(첫 줄 "제목:" 또는 문장 끝말 없는 짧은 한 줄)은 모델에 넣지 않고 원문 그대로.
+  - HTTPS는 Caddy가 맡는다(인증서 자동 발급·갱신). 그 뒤 nginx가 요청 제한·6MiB·90/10·롤링을 그대로 맡고, Caddy가 준 사용자 IP만 믿는다. IP 관리는 Caddy 접속 로그(회전 보관) + nginx 차단 목록(403). certbot 방식은 #72에서 교체.
+  - 세션은 서명된 익명 쿠키(서버 저장소 없음, Lightsail·Cloud Run 같은 키)로 Lightsail 배포 뒤 착수. Redis 캐시는 보류.
+  - Cloud Run 최소 0대 유지. 모델 메모리 예산 300MB는 실측이 부족하면 350까지 올려도 됨.
+- 수치: #74 뒤 v2 p95 92.3ms, 프로세스 최대 메모리 295.6MiB(예산 300MB의 약 98.5%). 서버 전체(2GB)로는 api 두 대 기준 약 60%, 롤링 중 약 75% 예상.
+- 남은 것: #72(Caddy, 리뷰 중) 병합 → Lightsail 실제 배포 → nginx → Cloud Run 90/10 → v3-base 섀도·카나리 → 롤링. #71 결과 화면(로컬에서 보고 병합). 세션·쿠키. `docs/ARCHITECTURE.md`를 바뀐 결정에 맞게 고치기.
+
 ## 사용자 준비 (필요해질 때)
 - 클라우드: GCP 프로젝트·결제 완료, Lightsail 인스턴스·고정 IP·버킷 완료. 쓰지 않는 Route 53 호스팅 영역 삭제 필요
+- Claude Max 창(`wB:p3`, pioneer) `/login` 필요
 - #8 자동 학습: Max Mac `gh auth login`, 러너 토큰
 - 데이터 확대(선택): data.go.kr 보도자료 OpenAPI serviceKey 발급, AI Hub 행정문서 데이터 신청
