@@ -52,8 +52,7 @@ rollback_on_failure() {
             wait_healthy "$service" 90 || true
         done
         if (( proxy_updated )); then
-            docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*' || true
-            docker cp "$proxy_backup/config/." "$proxy_id:/etc/nginx/conf.d/" || true
+            docker cp "$proxy_backup/config/default.conf" "$proxy_id:/etc/nginx/conf.d/default.conf" || true
             docker cp "$proxy_backup/templates/default.conf.template" "$proxy_id:/etc/nginx/templates/default.conf.template" || true
             docker cp "$proxy_backup/templates/snippets/simple-word-routes.conf.template" "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" || true
             docker exec "$proxy_id" nginx -t && docker exec "$proxy_id" nginx -s reload || true
@@ -72,7 +71,7 @@ rollback_on_failure() {
 trap rollback_on_failure EXIT
 if [[ "$skip_proxy_update" != 1 ]]; then
     docker tag "$proxy_image_id" "$proxy_backup_ref"
-    docker cp "$proxy_id:/etc/nginx/conf.d/." "$proxy_backup/config/"
+    docker cp "$proxy_id:/etc/nginx/conf.d/default.conf" "$proxy_backup/config/default.conf"
     docker cp "$proxy_id:/etc/nginx/templates/default.conf.template" "$proxy_backup/templates/default.conf.template"
     docker cp "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" "$proxy_backup/templates/snippets/simple-word-routes.conf.template"
 fi
@@ -91,7 +90,7 @@ fi
 for service in api-1 api-2; do
     changed+=("$service")
     IMAGE="$IMAGE" compose up -d --no-deps --no-build --pull missing "$service"
-    if ! wait_healthy "$service" 90 || ! check_proxy_health || ! smoke_check "http://$DEPLOY_HOST:$HOST_PORT"; then
+    if ! wait_healthy "$service" 90 || ! check_proxy_health || ! smoke_check "$(smoke_url)"; then
         echo "$service health or smoke check failed" >&2
         compose logs --no-color --tail 30 "$service" proxy >&2 || true
         exit 1

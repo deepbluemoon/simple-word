@@ -91,6 +91,7 @@
 - `.venv/bin/python -m pytest -q`: 146 passed. 임시 소형 KoBART로 greedy·beam 결과를 Hugging Face generate와 비교한다. 실제 v2 ONNX(20개 parity 입력 × 3회)에서 기준 브랜치 p95/RSS는 93.4ms/359.6MiB, 현재 폭 1 경로는 92.3ms/295.6MiB였다. metadata의 모델 메모리는 272.1MB(300MB의 91%)로 기록되어 있으나, 전체 Python 프로세스 peak RSS는 295.6MiB(한도의 98.5%)라 여유가 약 4.4MiB다.
 
 ## PR #72 Lightsail Caddy HTTPS
-- #66(`c8c5dc4`) 위로 rebase한 뒤 #74·#82도 반영한다. 외부 80/443은 Caddy만 게시하고 nginx는 내부 HTTP로 둔다. nginx는 Caddy edge 네트워크의 X-Forwarded-For만 신뢰한다.
+- #66(`c8c5dc4`) 위로 rebase한 뒤 #74·#82도 반영했다. 외부 80/443은 Caddy만 게시하고 nginx는 내부 HTTP로 둔다. API는 내부 backend network에만 연결하고 nginx는 edge network에서 고정한 Caddy IP `10.203.0.254/32`의 X-Forwarded-For만 신뢰한다.
 - Caddy의 `/data`와 `/config`는 named volume이며, access JSON 로그는 10 MiB×5개 순환 보관한다. blocklist 변경은 관리 스크립트로 nginx 검사·reload를 거친다.
+- 로컬 Caddy 내부 CA·별도 클라이언트 IP rate limit·XFF 위조 거부·blocklist 403·로그 필드를 확인했고, 배포 smoke와 롤링 실패 복구도 통과했다. 전체 pytest는 124 passed, 1 skipped.
 - 아직 Lightsail 실배포는 하지 않는다.

@@ -1,0 +1,16 @@
+moon.eta.pyhub.kr {
+	log_append path {http.request.uri.path}
+	log {
+		output file /data/access.json {
+			roll_size 10MiB
+			roll_keep 5
+			roll_keep_for 120h
+		}
+		format filter {
+			wrap json
+			request>uri delete
+			request>headers delete
+		}
+	}
+	reverse_proxy nginx:80
+}

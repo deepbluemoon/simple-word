@@ -3,10 +3,9 @@ resolver 127.0.0.11 ipv6=off valid=5s;
 limit_req_zone $binary_remote_addr zone=simplify_per_ip:10m rate=${NGINX_SIMPLIFY_RATE};
 limit_req_zone $binary_remote_addr zone=feedback_per_ip:10m rate=${NGINX_FEEDBACK_RATE};
 limit_conn_zone $binary_remote_addr zone=connections_per_ip:10m;
-map $scheme $simple_word_https_redirect {
-    http ${NGINX_HTTPS_REDIRECT};
-    default off;
-}
+set_real_ip_from 10.203.0.254/32;
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
 
 upstream api_backend {
     zone api_backend 64k;
@@ -30,9 +29,5 @@ server {
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
-    location ^~ /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-        default_type text/plain;
-    }
     include /etc/nginx/conf.d/snippets/simple-word-routes.conf;
 }

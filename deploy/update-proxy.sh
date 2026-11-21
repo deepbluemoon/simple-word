@@ -15,8 +15,7 @@ proxy_image_id="$(docker image inspect --format '{{.Id}}' "$proxy_image_ref")"
 proxy_backup_ref="${proxy_image_ref%:*}:rollback-${COMPOSE_PROJECT_NAME}-$$"
 config_changed=0
 restore_old() {
-    docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*' || return
-    docker cp "$work/old-config/." "$proxy_id:/etc/nginx/conf.d/" || return
+    docker cp "$work/old-config/default.conf" "$proxy_id:/etc/nginx/conf.d/default.conf" || return
     docker cp "$work/old-templates/default.conf.template" "$proxy_id:/etc/nginx/templates/default.conf.template" || return
     docker cp "$work/old-templates/snippets/simple-word-routes.conf.template" "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" || return
     docker exec "$proxy_id" nginx -t || return
@@ -67,15 +66,14 @@ if (( ! rendered )); then
     exit 1
 fi
 
-docker cp "$config_container:/etc/nginx/conf.d/." "$work/new-config/"
+docker cp "$config_container:/etc/nginx/conf.d/default.conf" "$work/new-config/default.conf"
 docker cp "$config_container:/etc/nginx/templates/default.conf.template" "$work/new-templates/default.conf.template"
 docker cp "$config_container:/etc/nginx/templates/snippets/simple-word-routes.conf.template" "$work/new-templates/snippets/simple-word-routes.conf.template"
-docker cp "$proxy_id:/etc/nginx/conf.d/." "$work/old-config/"
+docker cp "$proxy_id:/etc/nginx/conf.d/default.conf" "$work/old-config/default.conf"
 docker cp "$proxy_id:/etc/nginx/templates/default.conf.template" "$work/old-templates/default.conf.template"
 docker cp "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" "$work/old-templates/snippets/simple-word-routes.conf.template"
 config_changed=1
-docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*'
-docker cp "$work/new-config/." "$proxy_id:/etc/nginx/conf.d/"
+docker cp "$work/new-config/default.conf" "$proxy_id:/etc/nginx/conf.d/default.conf"
 docker cp "$work/new-templates/default.conf.template" "$proxy_id:/etc/nginx/templates/default.conf.template"
 docker cp "$work/new-templates/snippets/simple-word-routes.conf.template" "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template"
 docker exec "$proxy_id" nginx -t
