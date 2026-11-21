@@ -1,4 +1,5 @@
 import type { AnalysisResult } from '@/api/simpleWord'
+import { pruneFeedbackVotes } from '@/stores/feedbackVotes'
 
 const KEY = 'simple-word.recent-results'
 const LIMIT = 10
@@ -7,13 +8,19 @@ const recent = new Map<string, AnalysisResult>()
 export function readHistory(): AnalysisResult[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(KEY) ?? '[]')
-    return Array.isArray(value) ? value.filter(isResult) : []
+    const history = Array.isArray(value) ? value.filter(isResult) : []
+    return history
   } catch { return [] }
 }
 
 export function saveResult(result: AnalysisResult) {
   recent.set(result.id, result)
-  try { localStorage.setItem(KEY, JSON.stringify([result, ...readHistory().filter((item) => item.id !== result.id)].slice(0, LIMIT))) }
+  while (recent.size > LIMIT) recent.delete(recent.keys().next().value!)
+  try {
+    const history = [result, ...readHistory().filter((item) => item.id !== result.id)].slice(0, LIMIT)
+    localStorage.setItem(KEY, JSON.stringify(history))
+    pruneFeedbackVotes([...history.map((item) => item.id), ...recent.keys()])
+  }
   catch { /* 저장 공간이 없으면 현재 결과는 서버 응답으로 계속 보여 준다. */ }
 }
 

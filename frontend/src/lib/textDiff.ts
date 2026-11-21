@@ -6,6 +6,10 @@ const NUMBER_GLOBAL = /[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:년|월|일|�
 const TOKENS = /[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:년|월|일|시|분|초|원|명|건|회|번|개|주|개월|%|퍼센트)?|\s+|[\p{L}\p{M}]+|[^\s]/gu
 
 export function diffWords(original: string, simple: string) {
+  if (original.length > 0 && original === simple) {
+    const same = coarseParts(original, 'same')
+    return { original: same, simple: same }
+  }
   if (original.length + simple.length > 20_000) {
     // shortcut: very long sentences keep shared numeric markers but skip word diff to bound browser memory.
     return { original: coarseParts(original, 'removed'), simple: coarseParts(simple, 'added') }

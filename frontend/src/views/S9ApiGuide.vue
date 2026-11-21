@@ -8,6 +8,7 @@ curl -X POST http://localhost:8000/simplify \\
   -F 'file=@공문서.txt'</pre></div>
       <h3 class="section-title mt-xl">응답 예</h3>
       <pre class="code-block">{
+  "request_id": "server-issued-id",
   "model_version": "v1",
   "sentences": [
     { "original": "신청은 2026년 12월 31일까지 해야 합니다.",
@@ -15,10 +16,10 @@ curl -X POST http://localhost:8000/simplify \\
   ]
 }</pre>
       <p class="t-body-sm muted">제목으로 판정한 첫 줄에는 <code>title: true</code>가 붙으며, 원문 그대로 결과에 포함됩니다.</p>
-      <h2 class="mt-xl">문장별 의견 보내기</h2><p><code>POST /feedback</code>에 바꾼 결과의 모델 버전과 문장, 의견을 JSON으로 보내세요.</p>
+      <h2 class="mt-xl">문장별 의견 보내기</h2><p><code>POST /feedback</code>에 응답의 <code>request_id</code>, 클라이언트가 만든 결과 ID, 0부터 시작하는 문장 번호, 모델 버전과 의견을 JSON으로 보내세요. 같은 요청·결과·문장 키를 다시 보내면 검토 스크립트는 마지막 기록을 사용해요.</p>
       <div class="terminal-card"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><pre>curl -X POST http://localhost:8000/feedback \\
   -H 'Content-Type: application/json' \\
-  -d '{"model_version":"v1","original":"원문","simple":"쉬운 말","vote":"up"}'</pre></div>
+  -d '{"request_id":"server-issued-id","result_id":"result-uuid","sentence_index":0,"model_version":"v1","original":"원문","simple":"쉬운 말","vote":"up"}'</pre></div>
       <p class="t-body-sm muted mt-lg">의견은 <code>vote</code>에 <code>up</code> 또는 <code>down</code>을 넣어 주세요. 서버 상태와 모델 버전은 <code>GET /health</code>에서 확인할 수 있어요.</p>
     </section>
   </div>

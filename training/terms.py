@@ -86,6 +86,35 @@ def parse_law_xml(text):
     return out
 
 
+def parse_law_cache(text):
+    """Read cached JSON API records and any XML response bodies they contain."""
+    out = {}
+    hard_names = {"법령용어명", "법령용어명_한글", "lstrmNm"}
+    easy_names = {"일상용어명", "dlytrmNm"}
+
+    def visit(value):
+        if isinstance(value, str) and value.lstrip().startswith("<"):
+            out.update(merge_dicts(out, parse_law_xml(value)))
+        elif isinstance(value, dict):
+            hard = [str(v).strip() for k, v in value.items() if k in hard_names and v]
+            easy = [str(v).strip() for k, v in value.items() if k in easy_names and v]
+            if hard and easy:
+                _add(out, hard[0], easy, LAW_SOURCE)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    for line in text.splitlines():
+        if line.strip():
+            try:
+                visit(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
 # ---------- 법제처 Open API (용어별 조회) ----------
 LAW_API = "https://www.law.go.kr/DRF/lawService.do"
 LAW_TARGETS = ("lstrmRlt", "dlytrmRlt")  # 법령용어→일상용어, 일상용어→법령용어
@@ -196,14 +225,14 @@ def law_dict(data_dir="data", strict=False):
     rows = list(map(json.loads, cache.open(encoding="utf-8"))) if cache.exists() else []
     if strict:
         for r in rows:
-            if r["target"] == "dlytrmRlt" and "dlytrmRltService" in r["xml"][:200]:
+            if r.get("target") == "dlytrmRlt" and "dlytrmRltService" in r.get("xml", "")[:200]:
                 daily.update(n.strip() for n in DAILY_NAME.findall(r["xml"]))
     for r in rows:
-        if strict and r["target"] != "lstrmRlt":
+        if strict and r.get("target") != "lstrmRlt":
             continue
         try:
-            parts.append(parse_law_xml(r["xml"]))
-        except ET.ParseError:
+            parts.append(parse_law_xml(r["xml"]) if "xml" in r else parse_law_cache(json.dumps(r, ensure_ascii=False)))
+        except (ET.ParseError, json.JSONDecodeError):
             continue
     if (data / "law_terms.xml").exists():
         parts.append(parse_law_xml((data / "law_terms.xml").read_text(encoding="utf-8")))

@@ -17,7 +17,7 @@ function loadVotes() {
   } catch { /* storage can be disabled or contain invalid JSON */ }
 }
 
-function voteKey(resultId: string, sentenceIndex: number) { return `${resultId}:${sentenceIndex}` }
+function voteKey(resultId: string, sentenceIndex: number) { return `${encodeURIComponent(resultId)}:${sentenceIndex}` }
 
 export function getFeedbackVote(resultId: string, sentenceIndex: number): Vote | null {
   loadVotes()
@@ -28,4 +28,16 @@ export function saveFeedbackVote(resultId: string, sentenceIndex: number, vote: 
   loadVotes()
   votes[voteKey(resultId, sentenceIndex)] = vote
   try { localStorage.setItem(KEY, JSON.stringify(votes)) } catch { /* in-memory vote still applies this session */ }
+}
+
+export function pruneFeedbackVotes(resultIds: string[]) {
+  loadVotes()
+  const prefixes = resultIds.map((id) => `${encodeURIComponent(id)}:`)
+  let changed = false
+  for (const key of Object.keys(votes)) {
+    if (!prefixes.some((prefix) => key.startsWith(prefix))) { delete votes[key]; changed = true }
+  }
+  if (changed) {
+    try { localStorage.setItem(KEY, JSON.stringify(votes)) } catch { /* in-memory votes still apply this session */ }
+  }
 }

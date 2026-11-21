@@ -5,13 +5,18 @@ export interface SentenceResult {
   fallback_reason?: 'numbers' | 'preserve' | 'length' | null
   paragraph_id?: number
   title?: boolean
+  terms?: DifficultTerm[]
 }
+
+export interface DifficultTerm { text: string; start: number; end: number; easy: string[]; source: string }
 
 export interface AnalysisResult {
   id: string
+  request_id?: string
   filename: string
   model_version: string
   created_at: string
+  term_licenses?: Record<string, string>
   sentences: SentenceResult[]
 }
 
@@ -43,11 +48,14 @@ function upload(file: File) {
   return fetch('/simplify', { method: 'POST', body })
 }
 
-export async function sendFeedback(model_version: string, original: string, simple: string, vote: 'up' | 'down') {
+export async function sendFeedback(
+  request_id: string, result_id: string, sentence_index: number,
+  model_version: string, original: string, simple: string, vote: 'up' | 'down',
+) {
   const response = await fetch('/feedback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model_version, original, simple, vote }),
+    body: JSON.stringify({ request_id, result_id, sentence_index, model_version, original, simple, vote }),
   })
   if (!response.ok) throw new ApiError(response.status, await responseMessage(response))
 }

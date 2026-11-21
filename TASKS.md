@@ -49,4 +49,5 @@
 | T23 (#73) | GCP 예산·Artifact Registry·모델 버킷·서비스 계정·GitHub WIF·배포 스크립트 | Codex | done (merged to main) |
 | T24 (#81) | PDF 업로드 거절, PDF 파서·의존성 제거, 문서와 화면 갱신 | Codex | done (merged to main) |
 | T25 | 예시 파일 TXT·DOCX·HWPX 제공, 제목 문장 원문 유지 | Codex | done (PR #82 merged) |
-| T26 (#74) | n-best 빔 추론·export parity 수정 | Codex | PR 준비 중 (`codex/nbest-fixes`) |
+| T26 (#74) | n-best 빔 추론·export parity 수정 | Codex | done (merged to main) |
+| T27 (#71) | 쉬운 말·원문 주석 화면, API 용어 위치·접근성 | Codex | PR 준비 중 (`codex/original-view`) |
