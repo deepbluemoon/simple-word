@@ -55,7 +55,7 @@
 - champion은 v2다. v3-base는 평가셋 v2 게이트를 통과했지만, Cloud Run 카나리·섀도 검증 전까지는 weight 0 후보로 유지한다.
 - PR #50의 `found()` 최적화는 사전 1,627개 용어 × 합성 문장 10,000개에서 결과 2,157건 일치, 최적화 후 1.398초였다. 기존 방식 100문장 측정 37.473초를 선형 환산하면 약 62.5분(추정)이다.
 - 배포 확정안: 도메인과 Route 53은 쓰지 않는다. Lightsail nginx가 Lightsail API 두 개와 공개 Cloud Run `run.app`으로 90/10 분산하고, API 둘 다 실패하면 Cloud Run으로 보낸다. Cloud Run은 1 GiB, min 0/max 2이며 리비전 카나리·섀도·오토스케일링을 맡는다. Lightsail 전체 장애 때는 `run.app` 주소를 수동 안내한다.
-- 다음 순서는 #66 배포 검증 수정, Codex의 TXT/DOCX/HWPX 예시·제목 보존 작업, codex2 PR #74다. 평가셋은 Claude가 193건을 검수했으며 사람의 재검토는 별도 결정 사항이다.
+- 다음은 Codex의 TXT/DOCX/HWPX 예시·제목 보존 PR, 이어서 codex2 PR #74다. 평가셋은 Claude가 193건을 검수했으며 사람의 재검토는 별도 결정 사항이다.
 
 ## PR #68 문서 보기 리뷰 수정 (Codex)
 - 문장 선택 요소를 줄바꿈 가능한 inline 키보드 버튼으로 바꾸고, 의견 투표를 결과·문장 단위로 양쪽 보기와 새로고침에서 공유한다. 활성 보기만 렌더링하며 결과 ID 변경 시 선택과 탭을 초기화한다.
@@ -83,4 +83,4 @@
 - PR #73 `codex/gcp-setup`은 main에 병합됐다.
 - PR #81 `codex/drop-pdf`는 병합됐다.
 - PR #72는 codex2가 #70 후속 보완과 함께 진행한다. Codex는 현재 `codex/deploy-check-paths`에서 #66 rebase·리뷰 수정·검증을 처리한다.
-- #66 다음은 요청받은 예시 파일·제목 처리 작업(T25), 그다음 codex2의 PR #74다. PR 병합은 총괄이 한다.
+- #66은 병합됐다. T25 예시 파일·제목 보존은 `codex/title-samples`에서 준비 중이고, 이후 순서는 총괄의 병합 뒤 codex2 PR #74다. PR 병합은 총괄이 한다.

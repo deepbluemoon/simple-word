@@ -1,14 +1,10 @@
 <script setup lang="ts">
+import { loadSample, samples } from '@/lib/samples'
+
 const emit = defineEmits<{ select: [file: File] }>()
-const samples = [
-  { id: 'notice', file: '주민 안내문 예시.txt', name: '주민 안내문', count: '3문장' },
-  { id: 'application', file: '지원 신청서 예시.txt', name: '지원 신청서 안내', count: '3문장' },
-  { id: 'facility', file: '시설 이용 안내 예시.txt', name: '시설 이용 안내', count: '3문장' },
-]
 
 async function select(sample: typeof samples[number]) {
-  const response = await fetch(`/samples/${sample.id}.txt`)
-  if (response.ok) emit('select', new File([await response.text()], sample.file, { type: 'text/plain' }))
+  try { emit('select', await loadSample(sample)) } catch { /* selection can be retried */ }
 }
 </script>
 
@@ -18,12 +14,12 @@ async function select(sample: typeof samples[number]) {
     <div class="sfm-track" aria-label="공문서 예시">
       <ul class="sfm-row">
         <li v-for="sample in samples" :key="sample.id" class="sfm-card" draggable="true" @dragstart="$event.dataTransfer?.setData('text/plain', sample.id)" @click="select(sample)">
-          <span class="sfm-doc" aria-hidden="true">▤</span><span class="sfm-kind">TXT</span><span class="sfm-name">{{ sample.name }}</span><span class="sfm-size">{{ sample.count }}</span><span class="sfm-tag">예시</span>
+          <span class="sfm-doc" aria-hidden="true">▤</span><span class="sfm-kind">{{ sample.kind }}</span><span class="sfm-name">{{ sample.name }}</span><span class="sfm-size">{{ sample.count }}</span><span class="sfm-tag">예시</span>
         </li>
       </ul>
     </div>
     <div class="sfm-foot"><div class="sfm-uses" role="group" aria-label="공문서 예시 고르기">
-      <button v-for="sample in samples" :key="sample.id" type="button" class="sfm-use" @click="select(sample)"><span class="sfm-use-kind">TXT</span>{{ sample.name }}</button>
+      <button v-for="sample in samples" :key="sample.id" type="button" class="sfm-use" @click="select(sample)"><span class="sfm-use-kind">{{ sample.kind }}</span>{{ sample.name }}</button>
     </div></div>
   </div>
 </template>

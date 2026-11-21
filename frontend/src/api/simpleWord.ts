@@ -4,6 +4,7 @@ export interface SentenceResult {
   fallback: boolean
   fallback_reason?: 'numbers' | 'preserve' | 'length' | null
   paragraph_id?: number
+  title?: boolean
 }
 
 export interface AnalysisResult {

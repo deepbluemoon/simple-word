@@ -69,6 +69,26 @@ test('uploads a public document, sends sentence feedback, and restores the resul
   await expect(page.getByText('주민 안내문.txt')).toBeVisible()
 })
 
+test('keeps a conservative title unchanged while simplifying the body', async ({ page }) => {
+  await page.route('**/simplify', (route) => route.fulfill({ json: {
+    model_version: 'e2e',
+    sentences: [
+      { original: '제목: 신청 안내', simple: '제목: 신청 안내', fallback: false, title: true, paragraph_id: 0 },
+      { original: '신청서를 제출하세요.', simple: '신청서를 내세요.', fallback: false, title: false, paragraph_id: 1 },
+    ],
+  } }))
+  await page.goto('/')
+  await page.locator('input[type=file]').setInputFiles({
+    name: '안내.txt', mimeType: 'text/plain', buffer: Buffer.from('제목: 신청 안내\n\n신청서를 제출하세요.'),
+  })
+  await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
+  await expect(page.getByText('제목·원문 유지')).toBeVisible()
+  await expect(page.locator('.document-sentence').first()).toContainText('제목: 신청 안내')
+  await expect(page.locator('.document-sentence').last()).toContainText('내세요.')
+  await page.getByRole('tab', { name: '문장별 보기' }).click()
+  await expect(page.locator('.verdict').first()).toHaveText('제목·원문 유지')
+})
+
 test('accepts pasted text and keeps reading controls usable at 400px', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.setViewportSize({ width: 400, height: 800 })

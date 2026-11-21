@@ -176,9 +176,25 @@ def simplify_content(filename: str, data: bytes, request_id: str):
     started = time.perf_counter()
     version, role, model, shadow_version, shadow_model = router.select(request_id)
     text = extract_text(filename, data)
+    paragraphs = re.split(r"\n\s*\n+", text.strip())
+    title = None
+    if paragraphs:
+        first_lines = paragraphs[0].splitlines()
+        first_line = first_lines[0].strip() if first_lines else ""
+        explicit_title = first_line.startswith("제목:") and bool(first_line.removeprefix("제목:").strip())
+        short_heading = (
+            len(paragraphs) > 1 and len(first_lines) == 1 and 2 <= len(first_line) <= 40
+            and not re.search(r"[.!?。！？…][\"'”’）)]*$", first_line)
+            and not re.search(r"(?:합니다|됩니다|있습니다|바랍니다|하세요|해주세요|입니다|한다|된다)$", first_line)
+        )
+        if explicit_title or short_heading:
+            title = first_line
+            paragraphs[0] = "\n".join(first_lines[1:]).strip()
+            if not paragraphs[0]:
+                paragraphs.pop(0)
     paragraph_sentences = [
-        (paragraph_id, part.strip())
-        for paragraph_id, paragraph in enumerate(re.split(r"\n\s*\n+", text.strip()))
+        (paragraph_id + (title is not None), part.strip())
+        for paragraph_id, paragraph in enumerate(paragraphs)
         for part in re.split(r"(?<=[.!?。！？])\s+|\n+", paragraph)
         if part.strip()
     ]
@@ -191,15 +207,18 @@ def simplify_content(filename: str, data: bytes, request_id: str):
         log_request(request_id, role, version, sentences, [], started, type(exc).__name__)
         raise HTTPException(status_code=500, detail="Model inference failed") from exc
     log_request(request_id, role, version, sentences, simplified, started, fallbacks=fallbacks)
+    items = ([{"original": title, "simple": title, "fallback": False, "fallback_reason": None,
+               "paragraph_id": 0, "title": True}] if title is not None else [])
+    items.extend(
+        {"original": original, "simple": simple, "fallback": fallback, "fallback_reason": reason,
+         "paragraph_id": paragraph_id, "title": False}
+        for (paragraph_id, original), simple, fallback, reason in zip(
+            paragraph_sentences, simplified, fallbacks, fallback_reasons
+        )
+    )
     payload = {
         "model_version": version,
-        "sentences": [
-            {"original": original, "simple": simple, "fallback": fallback, "fallback_reason": reason,
-             "paragraph_id": paragraph_id}
-            for (paragraph_id, original), simple, fallback, reason in zip(
-                paragraph_sentences, simplified, fallbacks, fallback_reasons
-            )
-        ],
+        "sentences": items,
     }
     return payload, sentences, shadow_version, shadow_model
 

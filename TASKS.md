@@ -45,8 +45,8 @@
 | T19 (#68) | 문서 보기 리뷰 수정·실제 API E2E 확인·nightly 재검증 | Codex | review |
 | T20 (#70) | 보안 보강 후속: PDF 격리, 프록시 설정 복구, 오류 응답·피드백 보호 | Codex | done (merged `47f97b9`) |
 | T21 (#72) | Lightsail TLS·갱신 훅·Compose 설정 리뷰 수정 (#70 후속 포함) | codex2 | doing |
-| T22 (#66) | 배포 검증 경로·실배포 전 롤링 복구 검사·모델 버전 smoke | Codex | doing (`codex/deploy-check-paths`) |
+| T22 (#66) | 배포 검증 경로·실배포 전 롤링 복구 검사·모델 버전 smoke | Codex | done (PR #66 merged) |
 | T23 (#73) | GCP 예산·Artifact Registry·모델 버킷·서비스 계정·GitHub WIF·배포 스크립트 | Codex | done (merged to main) |
 | T24 (#81) | PDF 업로드 거절, PDF 파서·의존성 제거, 문서와 화면 갱신 | Codex | done (merged to main) |
-| T25 | 예시 파일 TXT·DOCX·HWPX 제공, 제목 문장 원문 유지 | Codex | queued after #66 |
-| T26 (#74) | codex2 담당 후속 PR | codex2 | queued after T25 |
+| T25 | 예시 파일 TXT·DOCX·HWPX 제공, 제목 문장 원문 유지 | Codex | PR 준비 중 (`codex/title-samples`) |
+| T26 (#74) | codex2 담당 후속 PR | codex2 | queued after T25 merge |

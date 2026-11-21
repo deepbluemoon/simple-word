@@ -26,7 +26,7 @@ const documentParagraphs = computed(() => {
     paragraph.map((sentence) => ({
       sentence,
       index: index++,
-      parts: sentence.fallback
+      parts: sentence.fallback || sentence.title
         ? [{ text: sentence.original, kind: 'same' as const, numeric: false }]
         : diffWords(sentence.original, sentence.simple).simple,
     })),
@@ -36,7 +36,7 @@ const selectedSentence = computed(() => selectedIndex.value == null ? null : res
 const changedCount = computed(() => result.value?.sentences.filter((sentence) => sentence.original !== sentence.simple).length ?? 0)
 const easyText = computed(() => paragraphs.value.join('\n\n'))
 const sideBySideText = computed(() => result.value?.sentences.map((sentence, index) => `문장 ${index + 1}\n원문: ${sentence.original}\n쉬운 말: ${outputSentence(sentence)}`).join('\n\n') ?? '')
-function outputSentence(sentence: SentenceResult) { return sentence.fallback ? sentence.original : sentence.simple }
+function outputSentence(sentence: SentenceResult) { return sentence.fallback || sentence.title ? sentence.original : sentence.simple }
 function setViewMode(mode: 'document' | 'sentences') {
   viewMode.value = mode
   void nextTick(() => viewTabButtons[mode === 'document' ? 0 : 1]?.focus())
@@ -103,7 +103,7 @@ function reasonText(reason?: string | null) {
                 <template v-for="(part, partIndex) in item.parts" :key="partIndex">
                   <mark v-if="part.kind === 'added'"><span class="visually-hidden">바뀐 부분: </span>{{ part.text }}</mark><template v-else>{{ part.text }}</template>
                 </template>
-                <span v-if="item.sentence.fallback" class="visually-hidden">원문 유지. </span>
+                <span v-if="item.sentence.title" class="title-preserved">제목·원문 유지</span><span v-else-if="item.sentence.fallback" class="visually-hidden">원문 유지. </span>
               </span><span aria-hidden="true"> </span>
             </template>
           </p>
@@ -121,7 +121,7 @@ function reasonText(reason?: string | null) {
       <section v-else id="sentences-panel" class="section tight sentence-list" :class="`reader-${readerSize}`" aria-labelledby="sentences-tab" role="tabpanel">
         <header class="comparison-summary"><h2 class="t-heading-md">문장별 비교</h2><span class="t-body-sm muted">{{ changedCount }} / {{ result.sentences.length }}개 문장에서 말이 바뀌었어요</span></header>
         <article v-for="(sentence, index) in result.sentences" :key="index" class="card sentence-card" :data-sentence="index">
-          <div class="sentence-head"><h2 class="t-heading-sm">문장 {{ index + 1 }}</h2><C5VerdictBadge :fallback="sentence.fallback" /></div>
+          <div class="sentence-head"><h2 class="t-heading-sm">문장 {{ index + 1 }}</h2><C5VerdictBadge :fallback="sentence.fallback" :title="sentence.title" /></div>
           <ComparisonView :original="sentence.original" :simple="outputSentence(sentence)" />
           <p v-if="sentence.fallback" class="fallback-reason" data-part="fallback-reason">{{ reasonText(sentence.fallback_reason) }}</p>
           <S5FeedbackPanel :result-id="result.id" :sentence-index="index" :model-version="result.model_version" :original="sentence.original" :simple="outputSentence(sentence)" />
@@ -144,6 +144,7 @@ function reasonText(reason?: string | null) {
 .sentence-card { display:grid;gap:var(--spacing-md);padding:var(--spacing-xl) }
 .sentence-head { display:flex;align-items:center;justify-content:space-between;gap:12px }
 .fallback-reason { margin:0;color:var(--color-gray-800);font-size:.9em }
+.title-preserved { display:inline-block;margin-left:6px;padding:2px 6px;border:1px solid var(--color-gray-300);border-radius:var(--rounded-full);font-size:11px;line-height:1.4;white-space:nowrap }
 .document-layout { display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:var(--spacing-xl);align-items:start }
 .document-page { min-width:0;padding:var(--spacing-xl);border:1px solid var(--color-gray-200);border-radius:var(--rounded-lg);background:var(--color-white) }
 .document-legend { display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 0 var(--spacing-lg);font-size:12px;color:var(--color-gray-800) }
