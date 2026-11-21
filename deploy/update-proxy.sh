@@ -10,18 +10,25 @@ fi
 config_container="${COMPOSE_PROJECT_NAME}-proxy-config-$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-proxy.XXXXXX")"
 mkdir "$work/new" "$work/old"
-cleanup() {
-    docker rm -f "$config_container" >/dev/null 2>&1 || true
-    rm -rf "$work"
-}
-trap cleanup EXIT
-
+config_changed=0
 restore_old() {
-    docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*'
-    docker cp "$work/old/." "$proxy_id:/etc/nginx/conf.d/"
-    docker exec "$proxy_id" nginx -t
+    docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*' || return
+    docker cp "$work/old/." "$proxy_id:/etc/nginx/conf.d/" || return
+    docker exec "$proxy_id" nginx -t || return
     docker exec "$proxy_id" nginx -s reload
 }
+finish() {
+    local status=$?
+    trap - EXIT
+    if (( status != 0 && config_changed )); then
+        echo "Proxy configuration update failed; restoring previous config" >&2
+        restore_old || echo "Failed to restore previous proxy configuration" >&2
+    fi
+    docker rm -f "$config_container" >/dev/null 2>&1 || true
+    rm -rf "$work"
+    exit "$status"
+}
+trap finish EXIT
 
 compose build proxy
 compose run --detach --no-deps --name "$config_container" proxy >/dev/null
@@ -42,18 +49,13 @@ fi
 
 docker cp "$config_container:/etc/nginx/conf.d/." "$work/new/"
 docker cp "$proxy_id:/etc/nginx/conf.d/." "$work/old/"
+config_changed=1
 docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*'
 docker cp "$work/new/." "$proxy_id:/etc/nginx/conf.d/"
-if ! docker exec "$proxy_id" nginx -t; then
-    restore_old
-    exit 1
-fi
-if ! docker exec "$proxy_id" nginx -s reload; then
-    restore_old
-    exit 1
-fi
+docker exec "$proxy_id" nginx -t
+docker exec "$proxy_id" nginx -s reload
 if ! compose exec -T proxy wget -q --header="Host: ${SIMPLE_WORD_DOMAIN:-localhost}" -O /dev/null http://127.0.0.1/health; then
-    echo "Proxy health check failed after reloading the new configuration; restoring previous config" >&2
-    restore_old
+    echo "Proxy health check failed after reloading the new configuration" >&2
     exit 1
 fi
+config_changed=0
