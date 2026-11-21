@@ -6,6 +6,25 @@ from simple_word.placeholders import TOKENS as PH_TOKENS, mask, unmask
 from simple_word.terms import missing_terms, preserve_terms
 
 EOS = 1  # KoBART: bos = eos = decoder_start = 1
+LENGTH_PENALTY = 1.0
+
+
+def _read_metadata(path):
+    try:
+        metadata = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        metadata = {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path} must contain valid JSON metadata") from exc
+    if not isinstance(metadata, dict):
+        raise ValueError("metadata.json must be a JSON object")
+    decoding = metadata.get("decoding", {})
+    if not isinstance(decoding, dict):
+        raise ValueError("metadata decoding must be a JSON object")
+    num_beams = decoding.get("num_beams", 1)
+    if type(num_beams) is not int or num_beams < 1:
+        raise ValueError("metadata decoding.num_beams must be an integer of at least 1")
+    return metadata
 
 
 class Simplifier:
@@ -24,6 +43,8 @@ class Simplifier:
         self.dummy = not (self.artifact_dir / "encoder.onnx").exists()
         if self.dummy:
             return
+        metadata = _read_metadata(self.artifact_dir / "metadata.json")
+        self.num_beams = metadata.get("decoding", {}).get("num_beams", 1)
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
@@ -35,21 +56,10 @@ class Simplifier:
         self.tok.no_padding()
         self.tok.no_truncation()
         self.placeholders = self.tok.token_to_id("<N0>") is not None
-        try:
-            self.num_beams = int(json.loads((self.artifact_dir / "metadata.json").read_text(encoding="utf-8"))
-                                 .get("decoding", {}).get("num_beams", 1))
-        except (OSError, TypeError, ValueError):
-            self.num_beams = 1
-        if self.num_beams < 1:
-            raise ValueError("metadata decoding.num_beams must be at least 1")
         # 자리표시자를 다 쓰기 전에는 EOS를 막을지: metadata.json decoding.force_placeholders (기본 False).
         # 켜면 fallback은 줄지만 빠진 숫자를 엉뚱한 문장에 붙여 뜻이 틀릴 수 있다 (docs/T6_V3.md 비교).
         if force_placeholders is None:
-            meta = self.artifact_dir / "metadata.json"
-            try:
-                force_placeholders = bool(json.loads(meta.read_text(encoding="utf-8")).get("decoding", {}).get("force_placeholders"))
-            except (OSError, ValueError):
-                force_placeholders = False
+            force_placeholders = bool(metadata.get("decoding", {}).get("force_placeholders"))
         self.force_placeholders = force_placeholders
 
     def simplify(self, sentences: list[str]) -> list[str]:
@@ -65,11 +75,16 @@ class Simplifier:
             return [(s, False, None) for s in sentences]
         out = []
         for s in sentences:
+            slots = []
+            force = getattr(self, "force_placeholders", False)
             if getattr(self, "placeholders", False):
                 masked, slots = mask(s)
-                candidates = self._candidates(masked, slots, getattr(self, "force_placeholders", False))
+                candidates = self._candidates(masked, slots, force)
             else:
                 candidates = self._candidates(s)
+            if candidates is None:
+                out.append((s, True, "placeholder" if force and slots else "decode"))
+                continue
             reason = None
             for candidate in candidates:
                 if candidate is None:
@@ -78,6 +93,8 @@ class Simplifier:
                 y = unmask(candidate, slots) if getattr(self, "placeholders", False) else candidate
                 if y is None:
                     reason = reason or "placeholder"
+                elif not y or (getattr(self, "num_beams", 1) > 1 and len(y) * 2 < len(s)):
+                    reason = reason or "length"
                 elif numbers(y) != numbers(s):
                     reason = reason or "numbers"
                 elif missing_terms(s, y, preserve_terms()):
@@ -95,28 +112,27 @@ class Simplifier:
         return self._beam(text, slots, force)
 
     def _one(self, text, max_len=256, slots=None, force=False):
-        """탐욕 디코딩. slots(자리표시자 모델)를 주면 입력에 없는 자리표시자는 내지 않는다.
-        force면 입력의 자리표시자를 모두 쓰기 전에는 문장을 끝내지 않는다(EOS 막음)."""
+        """기존 챔피언의 greedy 경로를 유지해 폭 1 배포의 지연·메모리를 보존한다."""
         import numpy as np
 
         ids = self.tok.encode(text, add_special_tokens=False).ids
-        if len(ids) > max_len - 1:  # 255토큰 초과: 잘라서 바꾸면 뒷부분 정보가 사라지므로 원문 그대로
+        if len(ids) > max_len - 1:
             return None
         ids = ids + [EOS]
         x = np.array([ids], dtype=np.int64)
         mask = np.ones_like(x)
-        cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})  # 층별 cross K/V, 한 번만
+        cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})
         feed = {"attention_mask": mask}
-        feed.update((o.name, c) for o, c in zip(self.encoder.get_outputs(), cross))
+        feed.update((output.name, value) for output, value in zip(self.encoder.get_outputs(), cross))
         heads, hd = cross[0].shape[1], cross[0].shape[3]
-        past_names = [i.name for i in self.decoder.get_inputs() if i.name.startswith("past_")]
-        past = [np.zeros((1, heads, 0, hd), dtype=np.float32) for _ in past_names]  # KV 캐시, 처음엔 길이 0
-        out = [EOS]
+        past_names = [item.name for item in self.decoder.get_inputs() if item.name.startswith("past_")]
+        past = [np.zeros((1, heads, 0, hd), dtype=np.float32) for _ in past_names]
         need, banned = set(), []
         if slots is not None:
-            ph = {t: self.tok.token_to_id(t) for t in PH_TOKENS}
-            need = {ph[t] for t in slots}
-            banned = [i for t, i in ph.items() if t not in slots and i is not None]
+            token_ids = {token: self.tok.token_to_id(token) for token in PH_TOKENS}
+            need = {token_ids[token] for token in slots}
+            banned = [token_id for token, token_id in token_ids.items() if token not in slots and token_id is not None]
+        out = [EOS]
         for step in range(min(2 * len(ids) + 16, max_len)):
             feed.update(zip(past_names, past))
             feed["input_ids"] = np.array([[out[-1]]], dtype=np.int64)
@@ -128,14 +144,14 @@ class Simplifier:
                 row[banned] = -np.inf
                 if force and need - set(out):
                     row[EOS] = -np.inf
-            nxt = int(row.argmax())
-            if nxt == EOS:
+            token = int(row.argmax())
+            if token == EOS:
                 break
-            out.append(nxt)
+            out.append(token)
         return self.tok.decode(out[1:], skip_special_tokens=True).strip()
 
     def _beam(self, text, slots=None, force=False, max_len=256):
-        """Cumulative log-probability 순으로 후보를 반환하며, encoder와 각 beam의 decoder KV를 유지한다."""
+        """폭 1은 greedy, 넓은 폭은 배치 beam search로 안전 후보를 점수 순 반환한다."""
         import numpy as np
 
         ids = self.tok.encode(text, add_special_tokens=False).ids
@@ -144,46 +160,85 @@ class Simplifier:
         ids = ids + [EOS]
         x = np.array([ids], dtype=np.int64)
         mask = np.ones_like(x)
+        width = getattr(self, "num_beams", 1)
         cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})
-        feed = {"attention_mask": mask}
-        feed.update((o.name, c) for o, c in zip(self.encoder.get_outputs(), cross))
+        cross = [np.repeat(value, width, axis=0) for value in cross]
         heads, hd = cross[0].shape[1], cross[0].shape[3]
         past_names = [i.name for i in self.decoder.get_inputs() if i.name.startswith("past_")]
-        initial_past = [np.zeros((1, heads, 0, hd), dtype=np.float32) for _ in past_names]
         need, banned = set(), []
         if slots is not None:
             ph = {t: self.tok.token_to_id(t) for t in PH_TOKENS}
             need = {ph[t] for t in slots}
             banned = [i for t, i in ph.items() if t not in slots and i is not None]
-        beams = [([EOS], 0.0, initial_past)]
+        beams = [([EOS], 0.0, [])]
         finished = []
-        width = self.num_beams
-        for step in range(min(2 * len(ids) + 16, max_len)):
-            expanded = []
-            for tokens, score, past in beams:
+        steps = min(2 * len(ids) + 16, max_len)
+        for step in range(steps):
+            batch = len(beams)
+            feed = {"attention_mask": np.repeat(mask, batch, axis=0)}
+            feed.update((output.name, value[:batch])
+                        for output, value in zip(self.encoder.get_outputs(), cross))
+            if past_names:
+                past = [np.concatenate([beam[2][index] for beam in beams], axis=0)
+                        if beams[0][2] else np.zeros((batch, heads, 0, hd), dtype=np.float32)
+                        for index in range(len(past_names))]
                 feed.update(zip(past_names, past))
-                feed["input_ids"] = np.array([[tokens[-1]]], dtype=np.int64)
-                feed["position_ids"] = np.array([[step]], dtype=np.int64)
-                logits, *next_past = self.decoder.run(None, feed)
-                row = logits[0, -1].astype(np.float64)
-                row -= np.logaddexp.reduce(row)
+            feed["input_ids"] = np.array([[beam[0][-1]] for beam in beams], dtype=np.int64)
+            feed["position_ids"] = np.full((batch, 1), step, dtype=np.int64)
+            logits, *next_past = self.decoder.run(None, feed)
+            logits = logits[:, -1, :]
+            if width > 1:
+                logits = logits.astype(np.float64)
+                normalizers = np.logaddexp.reduce(logits, axis=1, keepdims=True)
+                valid_rows = np.isfinite(normalizers[:, 0])
+                log_probs = np.full_like(logits, -np.inf)
+                log_probs[valid_rows] = logits[valid_rows] - normalizers[valid_rows]
+            candidates = []
+            for parent, (tokens, score, _) in enumerate(beams):
+                row = logits[parent].copy() if width == 1 else log_probs[parent].copy()
                 if slots is not None:
                     row[banned] = -np.inf
                     if force and need - set(tokens):
                         row[EOS] = -np.inf
-                beam_width = min(width, row.size)
-                cutoff = np.partition(row, -beam_width)[-beam_width]
+                if width == 1:
+                    if np.isfinite(row).any():
+                        candidates.append((score, parent, int(row.argmax())))
+                    continue
+                count = min(2 * width, np.isfinite(row).sum())
+                if not count:
+                    continue
+                cutoff = np.partition(row, -count)[-count]
                 token_ids = np.flatnonzero(row > cutoff)
-                ties = np.flatnonzero(row == cutoff)[:beam_width - len(token_ids)]
-                token_ids = sorted(np.concatenate((token_ids, ties)), key=lambda token: (-row[token], token))
+                ties = np.flatnonzero(row == cutoff)[:count - len(token_ids)]
+                token_ids = np.concatenate((token_ids, ties))
                 for token in token_ids:
-                    candidate = (tokens + [int(token)], score + float(row[token]), next_past)
-                    if token == EOS:
-                        finished.append(candidate)
-                    else:
-                        expanded.append(candidate)
-            beams = sorted(expanded, key=lambda beam: beam[1], reverse=True)[:width]
+                    candidates.append((score + float(row[token]), parent, int(token)))
+            candidates.sort(key=lambda item: (-item[0], item[2], item[1]))
+            next_beams = []
+            for rank, (score, parent, token) in enumerate(candidates[:2 * width]):
+                tokens = beams[parent][0] + [token]
+                if token == EOS:
+                    if rank < width:
+                        finished.append((tokens, score))
+                        finished.sort(key=lambda item: (-self._normalized_score(item[1], item[0]), item[0]))
+                        del finished[width:]
+                    if width == 1 and rank == 0:
+                        break
+                elif len(next_beams) < width:
+                    next_beams.append((tokens, score, [value[parent:parent + 1] for value in next_past]))
+            beams = next_beams
             if not beams:
                 break
-        ranked = sorted(finished + beams, key=lambda beam: beam[1], reverse=True)[:width]
-        return [self.tok.decode(tokens[1:], skip_special_tokens=True).strip() for tokens, _, _ in ranked]
+            # Future log probabilities cannot exceed zero; use the maximum output length as a safe score bound.
+            best_possible = max(beam[1] / steps**LENGTH_PENALTY for beam in beams)
+            if len(finished) == width and self._normalized_score(finished[-1][1], finished[-1][0]) >= best_possible:
+                break
+        ranked = finished + [(tokens, score) for tokens, score, _ in beams]
+        ranked.sort(key=lambda item: (-self._normalized_score(item[1], item[0]), item[0]))
+        if not ranked:
+            return None
+        return [self.tok.decode(tokens[1:], skip_special_tokens=True).strip() for tokens, _ in ranked[:width]]
+
+    @staticmethod
+    def _normalized_score(score, tokens):
+        return score / max(1, len(tokens) - 1) ** LENGTH_PENALTY
