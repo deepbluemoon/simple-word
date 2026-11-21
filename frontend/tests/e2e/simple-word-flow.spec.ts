@@ -130,15 +130,18 @@ test('explains the 5 MB file limit', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveText('파일은 5MB 이하여야 해요.')
 })
 
-test('explains unsupported file types', async ({ page }) => {
+test('rejects PDF and explains supported file types', async ({ page }) => {
   await page.goto('/')
-  await page.locator('input[type=file]').setInputFiles({
-    name: '안내.png',
-    mimeType: 'image/png',
-    buffer: Buffer.from('not a supported document'),
+  const input = page.locator('input[type=file]')
+  await expect(input).toHaveAttribute('accept', '.txt,.docx,.hwpx')
+  await expect(page.getByText('TXT · DOCX · HWPX 파일을 올릴 수 있어요.')).toBeVisible()
+  await input.setInputFiles({
+    name: '안내.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF not processed'),
   })
   await page.getByRole('button', { name: '쉬운 말로 바꾸기' }).click()
-  await expect(page.getByRole('alert')).toHaveText('TXT, DOCX, HWPX, PDF 파일을 올려 주세요.')
+  await expect(page.getByRole('alert')).toHaveText('PDF 파일은 지원하지 않아요. TXT, DOCX, HWPX 파일을 올려 주세요.')
 })
 
 test('explains the 100-sentence limit', async ({ page }) => {

@@ -27,8 +27,8 @@
 - Lightsail에는 오토스케일링이 없으므로 업로드·문장 수 상한과 동시 처리 제한, 넘치면 429로 거절(부하 차단).
 
 ## 5. 업로드 화면과 로컬 컨테이너 (T8, Codex)
-- TXT·DOCX·HWPX·PDF 글자 추출, 5MB·빈 파일 검사, 피드백(JSONL) 저장, Dockerfile·Compose.
-- 리뷰 후 보강: 압축 해제 총량 20MB(압축 폭탄 방지), PDF 50쪽, 무거운 처리는 threadpool로(이벤트 루프 막힘 방지).
+- TXT·DOCX·HWPX 글자 추출, 5MB·빈 파일 검사, 피드백(JSONL) 저장, Dockerfile·Compose.
+- 리뷰 후 보강: 압축 해제 총량 20MB(압축 폭탄 방지), 최대 100문장, 무거운 처리는 threadpool로(이벤트 루프 막힘 방지). PDF는 업로드를 받지 않도록 바꿨다.
 - 학습 노트(`docs/STUDY.md`) 시작.
 
 ## 6. 협업 규칙
