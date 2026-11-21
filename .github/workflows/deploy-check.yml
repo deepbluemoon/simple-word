@@ -1,0 +1,52 @@
+name: Deploy verification
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        required: true
+        type: string
+      model_directory:
+        required: true
+        type: string
+      model_version:
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - "deploy/**"
+      - "Dockerfile"
+      - "compose.yaml"
+      - "compose.yml"
+      - "docker-compose.yaml"
+      - "docker-compose.yml"
+      - "**/compose*.yaml"
+      - "**/compose*.yml"
+      - "api/**"
+      - "simple_word/**"
+      - "frontend/**"
+      - "gate/**"
+      - "training/**"
+      - "pyproject.toml"
+      - ".dockerignore"
+      - "scripts/smoke.py"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/deploy-check.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run local preflight with caller image and model
+        if: github.event_name == 'workflow_call'
+        env:
+          IMAGE: ${{ inputs.image }}
+          MODEL_DIRECTORY: ${{ inputs.model_directory }}
+          MODEL_VERSION: ${{ inputs.model_version }}
+        run: bash deploy/test-local.sh "$IMAGE" "$MODEL_DIRECTORY" "$MODEL_VERSION"
+      - name: Run isolated PR or manual rolling check
+        if: github.event_name != 'workflow_call'
+        run: bash deploy/test-local.sh

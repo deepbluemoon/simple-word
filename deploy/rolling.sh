@@ -3,10 +3,16 @@ set -Eeuo pipefail
 source "$(dirname -- "$0")/common.sh"
 
 IMAGE="${1:-${IMAGE:-}}"
+EXPECTED_MODEL_VERSION="${2:-${EXPECTED_MODEL_VERSION:-}}"
 if [[ -z "$IMAGE" ]]; then
-    echo "Usage: $0 <image:tag>" >&2
+    echo "Usage: $0 <image:tag> <model-version>" >&2
     exit 2
 fi
+if [[ -z "$EXPECTED_MODEL_VERSION" ]]; then
+    echo "A model version is required for the deployment smoke check" >&2
+    exit 2
+fi
+export EXPECTED_MODEL_VERSION
 previous1="$(compose ps --all --quiet api-1 | xargs -r docker inspect --format '{{.Config.Image}}' 2>/dev/null || true)"
 previous2="$(compose ps --all --quiet api-2 | xargs -r docker inspect --format '{{.Config.Image}}' 2>/dev/null || true)"
 if [[ -z "$previous1" || -z "$previous2" ]]; then
