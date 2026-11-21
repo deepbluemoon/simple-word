@@ -3,6 +3,7 @@ import json
 import logging
 import threading
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -38,8 +39,8 @@ def test_simplify_txt_returns_original_and_simple_sentences():
     assert response.json() == {
         "model_version": "dummy",
         "sentences": [
-            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False, "fallback_reason": None, "paragraph_id": 0},
-            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False, "fallback_reason": None, "paragraph_id": 0},
+            {"original": "첫 문장입니다.", "simple": "첫 문장입니다.", "fallback": False, "fallback_reason": None, "paragraph_id": 0, "title": False},
+            {"original": "둘째 문장입니다!", "simple": "둘째 문장입니다!", "fallback": False, "fallback_reason": None, "paragraph_id": 0, "title": False},
         ],
     }
 
@@ -80,7 +81,54 @@ def test_simplify_extracts_docx_text():
 
     assert response.status_code == 200
     assert response.json()["sentences"] == [{"original": "안내 문장입니다.", "simple": "안내 문장입니다.", "fallback": False,
-                                             "fallback_reason": None, "paragraph_id": 0}]
+                                             "fallback_reason": None, "paragraph_id": 0, "title": False}]
+
+
+@pytest.mark.parametrize("filename", ["notice.txt", "application.docx", "facility.hwpx"])
+def test_sample_documents_are_readable_by_simplify(filename):
+    data = (Path(__file__).parents[1] / "frontend" / "public" / "samples" / filename).read_bytes()
+
+    response = client.post("/simplify", files={"file": (filename, data)})
+
+    assert response.status_code == 200
+    sentences = response.json()["sentences"]
+    assert sentences[0]["title"] is True
+    assert sentences[0]["original"] == sentences[0]["simple"]
+    assert len(sentences) == 4
+    assert all(sentence["title"] is False for sentence in sentences[1:])
+
+
+@pytest.mark.parametrize(("content", "expected_title"), [
+    ("제목: 안내\n\n신청하세요.", "제목: 안내"),
+    ("시설 이용 안내\n\n운영 시간은 오후 8시까지입니다.", "시설 이용 안내"),
+    ("신청하세요\n\n운영 시간은 오후 8시까지입니다.", None),
+    ("짧은 문장입니다.\n\n운영 시간은 오후 8시까지입니다.", None),
+    ("짧은 안내", None),
+])
+def test_title_detection_is_limited_to_conservative_first_line(content, expected_title, monkeypatch):
+    seen = []
+
+    class Model:
+        def simplify(self, sentences):
+            seen.extend(sentences)
+            return [f"변환: {sentence}" for sentence in sentences]
+
+    class OneRouter:
+        def select(self, request_id):
+            return "v-title", "champion", Model(), None, None
+
+    monkeypatch.setattr(api_main, "router", OneRouter())
+    response = client.post("/simplify", files={"file": ("notice.txt", content)})
+    sentences = response.json()["sentences"]
+
+    assert response.status_code == 200
+    if expected_title:
+        assert sentences[0]["original"] == sentences[0]["simple"] == expected_title
+        assert sentences[0]["title"] is True
+        assert seen == [sentence["original"] for sentence in sentences[1:]]
+    else:
+        assert all(sentence["title"] is False for sentence in sentences)
+        assert seen == [sentence["original"] for sentence in sentences]
 
 
 def test_simplify_extracts_hwpx_text():
@@ -401,7 +449,7 @@ def test_simplify_reports_fallback_reason_and_paragraph(monkeypatch):
 
     assert response.json()["sentences"] == [
         {"original": "20일 안에 신청.", "simple": "20일 안에 신청.", "fallback": True,
-         "fallback_reason": "numbers", "paragraph_id": 0},
+         "fallback_reason": "numbers", "paragraph_id": 0, "title": False},
         {"original": "다음 문단은 확인합니다.", "simple": "다음 문단은 확인합니다.", "fallback": False,
-         "fallback_reason": None, "paragraph_id": 1},
+         "fallback_reason": None, "paragraph_id": 1, "title": False},
     ]

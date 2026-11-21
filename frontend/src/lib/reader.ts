@@ -16,7 +16,7 @@ export function saveReaderSize(size: ReaderSize) {
 
 export function groupParagraphs(sentences: SentenceResult[]) {
   return groupSentenceParagraphs(sentences).map((paragraph) =>
-    paragraph.map((sentence) => sentence.fallback ? sentence.original : sentence.simple).join(' '),
+    paragraph.map((sentence) => sentence.fallback || sentence.title ? sentence.original : sentence.simple).join(' '),
   )
 }
 

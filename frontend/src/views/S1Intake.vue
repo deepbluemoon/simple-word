@@ -8,6 +8,7 @@ import ProgressMeter from '@/components/common/ProgressMeter.vue'
 import ProgressWaitLine from '@/components/common/ProgressWaitLine.vue'
 import SampleFilesMotion from '@/components/common/SampleFilesMotion.vue'
 import { saveResult } from '@/stores/history'
+import { loadSample, samples } from '@/lib/samples'
 
 const router = useRouter()
 const input = ref<HTMLInputElement | null>(null)
@@ -45,11 +46,9 @@ function choose(f: File | undefined) {
 function onDrop(event: DragEvent) {
   event.preventDefault()
   const id = event.dataTransfer?.getData('text/plain')
-  const names: Record<string, string> = { notice: '주민 안내문 예시.txt', application: '지원 신청서 예시.txt', facility: '시설 이용 안내 예시.txt' }
-  const name = names[id ?? '']
-  if (name) {
-    void fetch(`/samples/${id}.txt`).then((r) => { if (!r.ok) throw new Error(); return r.text() })
-      .then((text) => choose(new File([text], name, { type: 'text/plain' })))
+  const sample = samples.find((item) => item.id === id)
+  if (sample) {
+    void loadSample(sample).then(choose)
       .catch(() => { error.value = '예시 문서를 불러오지 못했어요. 다시 시도해 주세요.' })
   } else choose(event.dataTransfer?.files[0])
 }

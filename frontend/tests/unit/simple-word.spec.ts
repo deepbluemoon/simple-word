@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { ApiError, sendFeedback, simplify } from '@/api/simpleWord'
 import C5VerdictBadge from '@/components/common/C5VerdictBadge.vue'
 import C11ModelServerState from '@/components/common/C11ModelServerState.vue'
 import S5FeedbackPanel from '@/views/S5FeedbackPanel.vue'
 import S4Result from '@/views/S4Result.vue'
+import SampleFilesMotion from '@/components/common/SampleFilesMotion.vue'
 import { getFeedbackVote } from '@/stores/feedbackVotes'
 import { findResult, readHistory, saveResult } from '@/stores/history'
 import { diffWords } from '@/lib/textDiff'
@@ -75,6 +76,37 @@ describe('result display and local history', () => {
     const wrapper = mount(C5VerdictBadge, { props: { fallback: true } })
     expect(wrapper.text()).toContain('원문 유지')
     expect(wrapper.attributes('data-fallback')).toBe('true')
+  })
+
+  it('loads each sample with its document extension and MIME type', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new ArrayBuffer(4)))
+    const wrapper = mount(SampleFilesMotion)
+    const buttons = wrapper.findAll('.sfm-use')
+    expect(wrapper.findAll('.sfm-kind').map((badge) => badge.text())).toEqual(['TXT', 'DOCX', 'HWPX'])
+    expect(buttons.map((button) => button.get('.sfm-use-kind').text())).toEqual(['TXT', 'DOCX', 'HWPX'])
+    for (const button of buttons) await button.trigger('click')
+    await flushPromises()
+    const selected = wrapper.emitted('select')!.map(([file]) => file as File)
+    expect(selected.map(({ name, type }) => [name, type])).toEqual([
+      ['주민 안내문 예시.txt', 'text/plain'],
+      ['지원 신청서 예시.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      ['시설 이용 안내 예시.hwpx', 'application/vnd.hancom.hwpx'],
+    ])
+  })
+
+  it('labels preserved title lines without treating them as model fallback', async () => {
+    saveResult({
+      id: 'title-result', filename: '안내.txt', model_version: 'v1', created_at: '2026-11-19T00:00:00Z',
+      sentences: [
+        { original: '제목: 안내', simple: '제목: 안내', fallback: false, title: true, paragraph_id: 0 },
+        { original: '신청서를 제출합니다.', simple: '신청서를 내요.', fallback: false, title: false, paragraph_id: 1 },
+      ],
+    })
+    const wrapper = mount(S4Result, { props: { id: 'title-result' }, global: { stubs: { C1Rail: true, RouterLink: true } } })
+    expect(wrapper.findAll('.document-sentence')[0].text()).toContain('제목·원문 유지')
+    await wrapper.get('#sentences-tab').trigger('click')
+    expect(wrapper.findAll('.verdict')[0].text()).toBe('제목·원문 유지')
+    expect(wrapper.get('.compare blockquote[aria-label="원문 문장"]').text()).toBe('제목: 안내')
   })
 
   it('describes model health in text and marks delayed service accessibly', () => {

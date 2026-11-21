@@ -77,6 +77,6 @@ GCP 카나리(리비전 비율)와 섀도 요청으로 새 champion을 검증한
 1. **추론**: `Simplifier(artifact_dir).simplify(sentences: list[str]) -> list[str]`. 길이·순서 같음, 같은 입력엔 같은 출력.
 2. **모델 아티팩트**: `models/<version>/` = 모델 파일 + `metadata.json`(`version`, `created_at`, `data_snapshot`, `base_model`, `metrics`) + `parity.jsonl`.
 3. **레지스트리**: 버킷의 `registry.json` `{"champion": "v3", "canary": "v4", "canary_weight": 0.1, "shadow": null}`. 배포·롤백 = 이 파일 변경.
-4. **API**: `POST /simplify`(파일) → `{"model_version", "sentences": [{"original", "simple"}]}`, `POST /feedback`, `GET /health`.
+4. **API**: `POST /simplify`(TXT, DOCX, HWPX 파일) → `{"model_version", "sentences": [{"original", "simple", "fallback", "title", "paragraph_id"}]}`. 제목으로 판정한 첫 줄은 모델에 보내지 않고 원문 그대로 반환한다. `POST /feedback`, `GET /health`.
 5. **서빙 컨테이너**: 모델 폴더는 읽기 전용(`:ro`)으로 마운트. 쓰기는 로그 폴더만.
 6. **로컬 먼저**: 서버에 올리기 전에 `docker compose up`으로 로컬에서 같은 구성을 띄워 확인한다.

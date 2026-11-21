@@ -11,9 +11,10 @@ curl -X POST http://localhost:8000/simplify \\
   "model_version": "v1",
   "sentences": [
     { "original": "신청은 2026년 12월 31일까지 해야 합니다.",
-      "simple": "2026년 12월 31일까지 신청하세요.", "fallback": false }
+      "simple": "2026년 12월 31일까지 신청하세요.", "fallback": false, "title": false }
   ]
 }</pre>
+      <p class="t-body-sm muted">제목으로 판정한 첫 줄에는 <code>title: true</code>가 붙으며, 원문 그대로 결과에 포함됩니다.</p>
       <h2 class="mt-xl">문장별 의견 보내기</h2><p><code>POST /feedback</code>에 바꾼 결과의 모델 버전과 문장, 의견을 JSON으로 보내세요.</p>
       <div class="terminal-card"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><pre>curl -X POST http://localhost:8000/feedback \\
   -H 'Content-Type: application/json' \\
