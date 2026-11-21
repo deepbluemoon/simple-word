@@ -63,6 +63,13 @@
 - 핵심 업로드 E2E와 CSP 진행 표시 확인은 실제 API를 호출하고 실제 응답 문장·문단을 검사한다. 429 테스트만 가짜 응답을 사용한다.
 - 검증: API 30 passed, 프론트 단위 17 passed, 타입 검사·색상 검사·프로덕션 빌드 통과. 첫 E2E 실행에서 API 문장 분할 기대값이 잘못된 점을 고친 뒤 nightly run `44673712918`의 browser-e2e·rate-limit·integration 전체 통과. PR #68은 병합 전 총괄 리뷰 대기.
 
+## PR #73 GCP 설정 후속
+- 대상은 `simple-word-515207`, `asia-northeast3`만이다. 월 예산은 기존 리소스 ID를 유지해 30 USD 환산액(2026-11-20 기준 39,937 KRW)으로 갱신했고 50/90/100% 알림을 유지했다.
+- 배포 스크립트는 Cloud Run gen2, 0–2 instances, GCS volume/mount 형식으로 맞췄다. setup은 버킷 공개 방지와 WIF owner ID 조건을 매 실행에 갱신하고 deployer에 버킷 객체 읽기 권한을 부여한다. budget-only 경로로 예산을 갱신해 이번 작업에서는 배포 버킷을 건드리지 않았다.
+- main에는 Cloud Run 첫 배포 완료가 기록되어 있다. 추가 배포는 하지 않는다. 현재 PR 수정은 기존 배포 스크립트와 설정 재실행 동작을 바로잡는 범위다.
+- 리뷰 후속: setup은 기존 버킷 lifecycle에서 `staging/` 삭제 규칙만 교체해 다른 규칙을 보존하고, deploy는 기존 환경 변수를 지키는 `--update-env-vars`를 쓴다. 공개 서비스 배포에 필요한 권한은 별도 커스텀 역할의 단일 `run.services.setIamPolicy`로 추가했다. 이 권한은 프로젝트 수준으로 바인딩되어 프로젝트의 Cloud Run 서비스 IAM 정책을 수정할 수 있다.
+- 검증: bash 구문 검사 및 `PYTHONPATH=. uv run --extra test pytest -q` 통과(118 passed, 1 skipped). 첫 pytest 호출은 저장소 루트를 `PYTHONPATH`에 포함하지 않아 수집 오류가 있었고, 올바른 import 경로로 다시 실행했다. 실제 GCP setup/deploy는 실행하지 않았다.
+
 ## 2026-11-20 Claude Max 평가셋 v2·재판정
 - **평가셋 v2:** `data/eval/eval_set.jsonl`은 200문장, 문장마다 정답 2개(`references`), SHA-1 `8922190f`이다. v1은 `eval_set.v1.jsonl`(`e3455f4b`)에 남겼다. 규칙·예시·재생성 명령(`training.eval_set fill-v2`·`build-v2`)은 `docs/EVAL_SET.md`에 있다. 사람 검수가 아니라 Claude 검수다.
 - **게이트(평가셋 v2):** dummy→v2 PASS, v2→v3-base PASS(SARI 0.4870 > 0.4794, bert_score_ref 0.8366 ≥ 0.8346, 어려운 용어 0.50 ≤ 0.60, p95 82.6ms, 메모리 267.6MB).
