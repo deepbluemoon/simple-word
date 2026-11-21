@@ -16,7 +16,7 @@ IMAGE=ghcr.io/OWNER/simple-word:VERSION docker compose -f deploy/compose.yaml up
 deploy/rolling.sh ghcr.io/OWNER/simple-word:VERSION
 ```
 
-롤링 스크립트는 (설정된 경우) `WEIGHT_HOOK`을 `up` 인자로 실행하고 `WEIGHT_HOOK_WAIT`초(기본 30초) 기다린다. 이어 `api-1`, `api-2`를 차례로 교체하며 각각 컨테이너 health와 프록시 smoke를 확인한다. 성공하면 훅을 `restore` 인자로 실행해 가중치를 기본 90/10으로 돌린다. 실패하면 이미 교체한 컨테이너를 각자의 기존 이미지로 되돌리고 가중치도 복귀시킨다.
+롤링 스크립트는 프록시 이미지를 갱신해 새 설정을 임시 컨테이너에서 렌더링하고, 기존 프록시에서 `nginx -t` 후 무중단 reload한다. 그 다음 (설정된 경우) `WEIGHT_HOOK`을 `up` 인자로 실행하고 `WEIGHT_HOOK_WAIT`초(기본 30초) 기다린다. 이어 `api-1`, `api-2`를 차례로 교체하며 각각 컨테이너 health와 프록시 smoke를 확인한다. 성공하면 훅을 `restore` 인자로 실행해 가중치를 기본 90/10으로 돌린다. 실패하면 이미 교체한 컨테이너를 각자의 기존 이미지로 되돌리고 가중치도 복귀시킨다.
 
 Route 53용 실행 파일은 아직 없다. 계정과 DNS 레코드에 맞춘 명령을 배포 호스트에서 `WEIGHT_HOOK`으로 지정한다. 예를 들면:
 

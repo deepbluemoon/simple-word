@@ -74,17 +74,28 @@ def test_failure_records_stage_and_stops(tmp_path):
     assert ok["status"] == "ok" and "last_failure" not in json.loads(ctx.state_path.read_text())
 
 
-def test_feedback_file_requires_review_before_pipeline_data_stages(tmp_path):
+def test_automatic_pipeline_never_reads_feedback_files(tmp_path, monkeypatch):
+    from pathlib import Path
+
     ctx = ctx_for(tmp_path)
     ctx.data_dir.mkdir(parents=True)
     (ctx.data_dir / "feedback.jsonl").write_text('{"vote":"up"}\n')
+    (ctx.data_dir / "feedback_approved.jsonl").write_text('{"vote":"up"}\n')
+    original_open = Path.open
+
+    def deny_feedback_read(path, *args, **kwargs):
+        if "feedback" in path.name:
+            raise AssertionError(f"automatic pipeline read {path.name}")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", deny_feedback_read)
+    for stage in ("_collect", "_preprocess", "_teacher", "_check"):
+        monkeypatch.setattr(pipeline, stage, lambda _ctx: {})
 
     report = run_pipeline(pipeline.data_stages(), ctx)
 
-    assert report["status"] == "failed"
-    assert report["failed_stage"] == "feedback_review_guard"
-    assert "review" in report["stages"][0]["error"]
-    assert all(stage["status"] == "not_run" for stage in report["stages"][1:])
+    assert report["status"] == "ok"
+    assert report["stages"][0]["result"] == {"feedback_imported": False}
 
 
 def test_main_returns_1_on_failure(tmp_path, monkeypatch):

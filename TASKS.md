@@ -43,3 +43,6 @@
 | T17 (#51) | 행안부·복지부 과거 보도자료 백필 | Claude Max | done (3,788문서, 통과 짝 13,176) |
 | T18 | 자리표시자 포함 v3 모델 학습·INT8 평가·게이트 비교 | Claude Max | done (v3-base 선택, 평가셋 v2 게이트 PASS → canary 후보; champion v2 유지) |
 | T19 (#68) | 문서 보기 리뷰 수정·실제 API E2E 확인·nightly 재검증 | Codex | review |
+| T20 (#70) | 보안 보강 후속: PDF 격리, 프록시 설정 복구, 오류 응답·피드백 보호 | Codex | doing (`codex/security-fixes`) |
+| T21 (#72) | Lightsail TLS·갱신 훅·Compose 설정 리뷰 수정 | Codex | queued after #70 |
+| T22 (#66) | 배포 검증 경로·롤링 복구 검사 리뷰 수정 | Codex | queued after #72 |

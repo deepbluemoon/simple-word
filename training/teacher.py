@@ -12,9 +12,9 @@ from training import checks
 from training.terms import found, nikl_dict, preserve_terms
 
 MODEL = "gemma3:27b"
-# 프롬프트 판: v1 = 국립국어원 사전(~2026-11-19 오후), v2-terms46 = #46 공통 사전(국립국어원 이표기 + 법제처 연계, 일반 용어 제외).
+# 프롬프트 판은 생성된 짝에 기록한다. v3-injection-guard는 원문 안 지시를 거부하도록 경계를 분명히 한 판이다.
 # pairs.jsonl 각 짝의 "prompt"에 남긴다(없으면 v1).
-PROMPT_VERSION = "v2-terms46"
+PROMPT_VERSION = "v3-injection-guard"
 OLLAMA = "http://localhost:11434/api/generate"
 ENGLISH = re.compile(r"[A-Za-z][A-Za-z0-9&+\-]*[A-Za-z0-9]")
 

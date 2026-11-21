@@ -16,6 +16,13 @@ fi
 
 changed=()
 weight_changed=0
+proxy_updated=0
+proxy_id="$(compose ps --all --quiet proxy)"
+if [[ -z "$proxy_id" ]]; then
+    echo "Proxy must already be running before a rolling deployment" >&2
+    exit 1
+fi
+proxy_backup="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-proxy-rollback.XXXXXX")"
 restore_weight() {
     if (( weight_changed )) && [[ -n "${WEIGHT_HOOK:-}" ]]; then
         bash -c "$WEIGHT_HOOK" -- restore >&2
@@ -27,23 +34,33 @@ rollback_on_failure() {
     trap - EXIT
     if (( status != 0 )); then
         echo "Rolling deployment failed; restoring prior containers" >&2
-        for service in "${changed[@]}"; do
+        for service in ${changed[@]+"${changed[@]}"}; do
             old="$previous1"
             [[ "$service" == api-2 ]] && old="$previous2"
             IMAGE="$old" compose up -d --no-deps --no-build --pull missing "$service" >&2 || true
             wait_healthy "$service" 90 || true
         done
+        if (( proxy_updated )); then
+            docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*' || true
+            docker cp "$proxy_backup/." "$proxy_id:/etc/nginx/conf.d/" || true
+            docker exec "$proxy_id" nginx -t && docker exec "$proxy_id" nginx -s reload || true
+        fi
         restore_weight || true
     fi
+    rm -rf "$proxy_backup"
     exit "$status"
 }
 trap rollback_on_failure EXIT
+docker cp "$proxy_id:/etc/nginx/conf.d/." "$proxy_backup/"
 
 if [[ -n "${WEIGHT_HOOK:-}" ]]; then
     weight_changed=1
     bash -c "$WEIGHT_HOOK" -- up
     sleep "${WEIGHT_HOOK_WAIT:-30}"
 fi
+
+bash "$DEPLOY_DIR/update-proxy.sh"
+proxy_updated=1
 
 for service in api-1 api-2; do
     changed+=("$service")
