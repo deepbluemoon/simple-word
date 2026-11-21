@@ -2,8 +2,18 @@
 set -Eeuo pipefail
 
 DEPLOY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="$DEPLOY_DIR/compose.yaml"
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-/etc/simple-word/deploy.env}"
+if [[ -d /srv/simple-word && ! -r "$DEPLOY_ENV_FILE" ]]; then
+    echo "Deployment settings are required but unreadable: $DEPLOY_ENV_FILE" >&2
+    exit 1
+fi
+if [[ -r "$DEPLOY_ENV_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$DEPLOY_ENV_FILE"
+fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-simple-word}"
+COMPOSE_FILES="${COMPOSE_FILES:-$DEPLOY_DIR/compose.yaml}"
+SIMPLE_WORD_DOMAIN="${SIMPLE_WORD_DOMAIN:-}"
 DEPLOY_HOST="${DEPLOY_HOST:-127.0.0.1}"
 HOST_PORT="${HOST_PORT:-8000}"
 DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-${HOME}/.simple-word}"
@@ -15,7 +25,15 @@ fi
 export COMPOSE_PROJECT_NAME HOST_PORT
 
 compose() {
-    docker compose --project-name "$COMPOSE_PROJECT_NAME" --file "$COMPOSE_FILE" "$@"
+    local files=() file
+    IFS=: read -r -a files <<< "$COMPOSE_FILES"
+    local args=()
+    for file in "${files[@]}"; do args+=(--file "$file"); done
+    if [[ -r "$DEPLOY_ENV_FILE" ]]; then
+        docker compose --env-file "$DEPLOY_ENV_FILE" --project-name "$COMPOSE_PROJECT_NAME" "${args[@]}" "$@"
+    else
+        docker compose --project-name "$COMPOSE_PROJECT_NAME" "${args[@]}" "$@"
+    fi
 }
 
 current_image() {
@@ -50,14 +68,41 @@ save_previous() {
 }
 
 health_url() {
-    printf 'http://%s:%s/health' "$DEPLOY_HOST" "$HOST_PORT"
+    if [[ "$COMPOSE_FILES" == *compose.lightsail.yaml* && -n "$SIMPLE_WORD_DOMAIN" ]]; then
+        printf 'https://%s/health' "$SIMPLE_WORD_DOMAIN"
+    else
+        printf 'http://%s:%s/health' "$DEPLOY_HOST" "$HOST_PORT"
+    fi
+}
+
+smoke_url() {
+    if [[ "$COMPOSE_FILES" == *compose.lightsail.yaml* && -n "$SIMPLE_WORD_DOMAIN" ]]; then
+        printf 'http://proxy:80'
+    else
+        printf 'http://%s:%s' "$DEPLOY_HOST" "$HOST_PORT"
+    fi
 }
 
 check_proxy_health() {
+    if [[ "$COMPOSE_FILES" == *compose.lightsail.yaml* && -n "$SIMPLE_WORD_DOMAIN" ]]; then
+        curl --fail --silent --show-error --max-time 5 --resolve "$SIMPLE_WORD_DOMAIN:443:127.0.0.1" \
+            "https://$SIMPLE_WORD_DOMAIN/health" >/dev/null
+        return
+    fi
     curl --fail --silent --show-error --max-time 5 "$(health_url)" >/dev/null
 }
 
 smoke_check() {
+    if [[ "$COMPOSE_FILES" == *compose.lightsail.yaml* ]]; then
+        local api_id
+        api_id="$(compose ps --all --quiet api-1)"
+        if [[ -n "${EXPECTED_MODEL_VERSION:-}" ]]; then
+            docker exec -i "$api_id" python - "$1" --expected-model-version "$EXPECTED_MODEL_VERSION" < "$DEPLOY_DIR/../scripts/smoke.py"
+        else
+            docker exec -i "$api_id" python - "$1" < "$DEPLOY_DIR/../scripts/smoke.py"
+        fi
+        return
+    fi
     if [[ -n "${EXPECTED_MODEL_VERSION:-}" ]]; then
         python3 "$DEPLOY_DIR/../scripts/smoke.py" "$1" --expected-model-version "$EXPECTED_MODEL_VERSION"
     else

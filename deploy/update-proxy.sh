@@ -9,27 +9,46 @@ if [[ -z "$proxy_id" ]]; then
 fi
 config_container="${COMPOSE_PROJECT_NAME}-proxy-config-$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-proxy.XXXXXX")"
-mkdir "$work/new" "$work/old"
+mkdir -p "$work/new-config" "$work/old-config" "$work/new-templates/snippets" "$work/old-templates/snippets"
+proxy_image_ref="$(docker inspect --format '{{.Config.Image}}' "$proxy_id")"
+proxy_image_id="$(docker image inspect --format '{{.Id}}' "$proxy_image_ref")"
+proxy_backup_ref="${proxy_image_ref%:*}:rollback-${COMPOSE_PROJECT_NAME}-$$"
 config_changed=0
 restore_old() {
-    docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*' || return
-    docker cp "$work/old/." "$proxy_id:/etc/nginx/conf.d/" || return
+    docker cp "$work/old-config/default.conf" "$proxy_id:/etc/nginx/conf.d/default.conf" || return
+    docker cp "$work/old-templates/default.conf.template" "$proxy_id:/etc/nginx/templates/default.conf.template" || return
+    docker cp "$work/old-templates/snippets/simple-word-routes.conf.template" "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" || return
     docker exec "$proxy_id" nginx -t || return
     docker exec "$proxy_id" nginx -s reload
+    wait_proxy_health
+}
+wait_proxy_health() {
+    for _ in {1..10}; do
+        if check_proxy_health; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
 }
 finish() {
     local status=$?
     trap - EXIT
-    if (( status != 0 && config_changed )); then
-        echo "Proxy configuration update failed; restoring previous config" >&2
-        restore_old || echo "Failed to restore previous proxy configuration" >&2
+    if (( status != 0 )); then
+        if (( config_changed )); then
+            echo "Proxy configuration update failed; restoring previous config" >&2
+            restore_old || echo "Failed to restore previous proxy configuration" >&2
+        fi
+        docker tag "$proxy_backup_ref" "$proxy_image_ref" || echo "Failed to restore previous proxy image tag" >&2
     fi
     docker rm -f "$config_container" >/dev/null 2>&1 || true
+    docker image rm "$proxy_backup_ref" >/dev/null 2>&1 || true
     rm -rf "$work"
     exit "$status"
 }
 trap finish EXIT
 
+docker tag "$proxy_image_id" "$proxy_backup_ref"
 compose build proxy
 compose run --detach --no-deps --name "$config_container" proxy >/dev/null
 rendered=0
@@ -47,14 +66,19 @@ if (( ! rendered )); then
     exit 1
 fi
 
-docker cp "$config_container:/etc/nginx/conf.d/." "$work/new/"
-docker cp "$proxy_id:/etc/nginx/conf.d/." "$work/old/"
+docker cp "$config_container:/etc/nginx/conf.d/default.conf" "$work/new-config/default.conf"
+docker cp "$config_container:/etc/nginx/templates/default.conf.template" "$work/new-templates/default.conf.template"
+docker cp "$config_container:/etc/nginx/templates/snippets/simple-word-routes.conf.template" "$work/new-templates/snippets/simple-word-routes.conf.template"
+docker cp "$proxy_id:/etc/nginx/conf.d/default.conf" "$work/old-config/default.conf"
+docker cp "$proxy_id:/etc/nginx/templates/default.conf.template" "$work/old-templates/default.conf.template"
+docker cp "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" "$work/old-templates/snippets/simple-word-routes.conf.template"
 config_changed=1
-docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*'
-docker cp "$work/new/." "$proxy_id:/etc/nginx/conf.d/"
+docker cp "$work/new-config/default.conf" "$proxy_id:/etc/nginx/conf.d/default.conf"
+docker cp "$work/new-templates/default.conf.template" "$proxy_id:/etc/nginx/templates/default.conf.template"
+docker cp "$work/new-templates/snippets/simple-word-routes.conf.template" "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template"
 docker exec "$proxy_id" nginx -t
 docker exec "$proxy_id" nginx -s reload
-if ! compose exec -T proxy wget -q --header="Host: ${SIMPLE_WORD_DOMAIN:-localhost}" -O /dev/null http://127.0.0.1/health; then
+if ! wait_proxy_health; then
     echo "Proxy health check failed after reloading the new configuration" >&2
     exit 1
 fi

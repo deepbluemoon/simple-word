@@ -23,12 +23,17 @@ fi
 changed=()
 weight_changed=0
 proxy_updated=0
+skip_proxy_update="${SKIP_PROXY_UPDATE:-0}"
 proxy_id="$(compose ps --all --quiet proxy)"
 if [[ -z "$proxy_id" ]]; then
     echo "Proxy must already be running before a rolling deployment" >&2
     exit 1
 fi
 proxy_backup="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-proxy-rollback.XXXXXX")"
+proxy_image_ref="$(docker inspect --format '{{.Config.Image}}' "$proxy_id")"
+proxy_image_id="$(docker image inspect --format '{{.Id}}' "$proxy_image_ref")"
+proxy_backup_ref="${proxy_image_ref%:*}:rollback-${COMPOSE_PROJECT_NAME}-$$"
+mkdir -p "$proxy_backup/config" "$proxy_backup/templates/snippets"
 restore_weight() {
     if (( weight_changed )) && [[ -n "${WEIGHT_HOOK:-}" ]]; then
         bash -c "$WEIGHT_HOOK" -- restore >&2
@@ -47,17 +52,29 @@ rollback_on_failure() {
             wait_healthy "$service" 90 || true
         done
         if (( proxy_updated )); then
-            docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*' || true
-            docker cp "$proxy_backup/." "$proxy_id:/etc/nginx/conf.d/" || true
+            docker cp "$proxy_backup/config/default.conf" "$proxy_id:/etc/nginx/conf.d/default.conf" || true
+            docker cp "$proxy_backup/templates/default.conf.template" "$proxy_id:/etc/nginx/templates/default.conf.template" || true
+            docker cp "$proxy_backup/templates/snippets/simple-word-routes.conf.template" "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" || true
             docker exec "$proxy_id" nginx -t && docker exec "$proxy_id" nginx -s reload || true
+            docker tag "$proxy_backup_ref" "$proxy_image_ref" || true
+            for _ in {1..10}; do
+                check_proxy_health && break
+                sleep 1
+            done
         fi
+        docker image rm "$proxy_backup_ref" >/dev/null 2>&1 || true
         restore_weight || true
     fi
     rm -rf "$proxy_backup"
     exit "$status"
 }
 trap rollback_on_failure EXIT
-docker cp "$proxy_id:/etc/nginx/conf.d/." "$proxy_backup/"
+if [[ "$skip_proxy_update" != 1 ]]; then
+    docker tag "$proxy_image_id" "$proxy_backup_ref"
+    docker cp "$proxy_id:/etc/nginx/conf.d/default.conf" "$proxy_backup/config/default.conf"
+    docker cp "$proxy_id:/etc/nginx/templates/default.conf.template" "$proxy_backup/templates/default.conf.template"
+    docker cp "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" "$proxy_backup/templates/snippets/simple-word-routes.conf.template"
+fi
 
 if [[ -n "${WEIGHT_HOOK:-}" ]]; then
     weight_changed=1
@@ -65,13 +82,15 @@ if [[ -n "${WEIGHT_HOOK:-}" ]]; then
     sleep "${WEIGHT_HOOK_WAIT:-30}"
 fi
 
-bash "$DEPLOY_DIR/update-proxy.sh"
-proxy_updated=1
+if [[ "$skip_proxy_update" != 1 ]]; then
+    bash "$DEPLOY_DIR/update-proxy.sh"
+    proxy_updated=1
+fi
 
 for service in api-1 api-2; do
     changed+=("$service")
     IMAGE="$IMAGE" compose up -d --no-deps --no-build --pull missing "$service"
-    if ! wait_healthy "$service" 90 || ! check_proxy_health || ! smoke_check "http://$DEPLOY_HOST:$HOST_PORT"; then
+    if ! wait_healthy "$service" 90 || ! check_proxy_health || ! smoke_check "$(smoke_url)"; then
         echo "$service health or smoke check failed" >&2
         compose logs --no-color --tail 30 "$service" proxy >&2 || true
         exit 1
@@ -80,5 +99,7 @@ done
 
 restore_weight
 if [[ "$previous1" != "$IMAGE" ]]; then save_previous "$previous1"; fi
+docker image rm "$proxy_backup_ref" >/dev/null 2>&1 || true
+rm -rf "$proxy_backup"
 trap - EXIT
 echo "Deployed $IMAGE to both API containers on $DEPLOY_HOST"

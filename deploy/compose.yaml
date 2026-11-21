@@ -40,6 +40,7 @@ services:
     ports:
       - "${HOST_PORT:-8000}:80"
     environment:
+      NGINX_SERVER_NAME: ${SIMPLE_WORD_DOMAIN:-localhost}
       NGINX_SIMPLIFY_RATE: ${NGINX_SIMPLIFY_RATE:-10r/m}
       NGINX_SIMPLIFY_BURST: ${NGINX_SIMPLIFY_BURST:-5}
       NGINX_FEEDBACK_RATE: ${NGINX_FEEDBACK_RATE:-30r/m}
@@ -51,7 +52,7 @@ services:
       api-2:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health"]
+      test: ["CMD-SHELL", "wget --header=\"Host: $$NGINX_SERVER_NAME\" -q -O /dev/null http://127.0.0.1/health"]
       interval: 5s
       timeout: 3s
       retries: 3

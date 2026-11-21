@@ -1,0 +1,55 @@
+services:
+  api-1:
+    restart: unless-stopped
+    networks: [api_backend]
+    volumes:
+      - /srv/simple-word/models:/app/models:ro
+      - /srv/simple-word/logs:/app/logs
+  api-2:
+    restart: unless-stopped
+    networks: [api_backend]
+    volumes:
+      - /srv/simple-word/models:/app/models:ro
+      - /srv/simple-word/logs:/app/logs
+  proxy:
+    restart: unless-stopped
+    ports: !reset []
+    networks:
+      api_backend: {}
+      caddy_edge:
+        aliases: [nginx]
+    environment:
+      NGINX_SERVER_NAME: ${SIMPLE_WORD_DOMAIN:?set SIMPLE_WORD_DOMAIN}
+    volumes:
+      - ./blocklist.conf:/etc/nginx/conf.d/snippets/blocklist.conf:ro
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      caddy_edge:
+        ipv4_address: 10.203.0.254
+    depends_on:
+      proxy:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  api_backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.204.0.0/24
+  caddy_edge:
+    ipam:
+      config:
+        - subnet: 10.203.0.0/24
