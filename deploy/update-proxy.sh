@@ -11,7 +11,8 @@ config_container="${COMPOSE_PROJECT_NAME}-proxy-config-$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-proxy.XXXXXX")"
 mkdir -p "$work/new-config" "$work/old-config" "$work/new-templates/snippets" "$work/old-templates/snippets"
 proxy_image_ref="$(docker inspect --format '{{.Config.Image}}' "$proxy_id")"
-proxy_image_id="$(docker inspect --format '{{.Image}}' "$proxy_id")"
+proxy_image_id="$(docker image inspect --format '{{.Id}}' "$proxy_image_ref")"
+proxy_backup_ref="${proxy_image_ref%:*}:rollback-${COMPOSE_PROJECT_NAME}-$$"
 config_changed=0
 restore_old() {
     docker exec "$proxy_id" sh -c 'rm -rf /etc/nginx/conf.d/*' || return
@@ -39,14 +40,16 @@ finish() {
             echo "Proxy configuration update failed; restoring previous config" >&2
             restore_old || echo "Failed to restore previous proxy configuration" >&2
         fi
-        docker tag "$proxy_image_id" "$proxy_image_ref" || echo "Failed to restore previous proxy image tag" >&2
+        docker tag "$proxy_backup_ref" "$proxy_image_ref" || echo "Failed to restore previous proxy image tag" >&2
     fi
     docker rm -f "$config_container" >/dev/null 2>&1 || true
+    docker image rm "$proxy_backup_ref" >/dev/null 2>&1 || true
     rm -rf "$work"
     exit "$status"
 }
 trap finish EXIT
 
+docker tag "$proxy_image_id" "$proxy_backup_ref"
 compose build proxy
 compose run --detach --no-deps --name "$config_container" proxy >/dev/null
 rendered=0

@@ -31,7 +31,8 @@ if [[ -z "$proxy_id" ]]; then
 fi
 proxy_backup="$(mktemp -d "${TMPDIR:-/tmp}/simple-word-proxy-rollback.XXXXXX")"
 proxy_image_ref="$(docker inspect --format '{{.Config.Image}}' "$proxy_id")"
-proxy_image_id="$(docker inspect --format '{{.Image}}' "$proxy_id")"
+proxy_image_id="$(docker image inspect --format '{{.Id}}' "$proxy_image_ref")"
+proxy_backup_ref="${proxy_image_ref%:*}:rollback-${COMPOSE_PROJECT_NAME}-$$"
 mkdir -p "$proxy_backup/config" "$proxy_backup/templates/snippets"
 restore_weight() {
     if (( weight_changed )) && [[ -n "${WEIGHT_HOOK:-}" ]]; then
@@ -56,12 +57,13 @@ rollback_on_failure() {
             docker cp "$proxy_backup/templates/default.conf.template" "$proxy_id:/etc/nginx/templates/default.conf.template" || true
             docker cp "$proxy_backup/templates/snippets/simple-word-routes.conf.template" "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" || true
             docker exec "$proxy_id" nginx -t && docker exec "$proxy_id" nginx -s reload || true
-            docker tag "$proxy_image_id" "$proxy_image_ref" || true
+            docker tag "$proxy_backup_ref" "$proxy_image_ref" || true
             for _ in {1..10}; do
                 check_proxy_health && break
                 sleep 1
             done
         fi
+        docker image rm "$proxy_backup_ref" >/dev/null 2>&1 || true
         restore_weight || true
     fi
     rm -rf "$proxy_backup"
@@ -69,6 +71,7 @@ rollback_on_failure() {
 }
 trap rollback_on_failure EXIT
 if [[ "$skip_proxy_update" != 1 ]]; then
+    docker tag "$proxy_image_id" "$proxy_backup_ref"
     docker cp "$proxy_id:/etc/nginx/conf.d/." "$proxy_backup/config/"
     docker cp "$proxy_id:/etc/nginx/templates/default.conf.template" "$proxy_backup/templates/default.conf.template"
     docker cp "$proxy_id:/etc/nginx/templates/snippets/simple-word-routes.conf.template" "$proxy_backup/templates/snippets/simple-word-routes.conf.template"
@@ -97,5 +100,7 @@ done
 
 restore_weight
 if [[ "$previous1" != "$IMAGE" ]]; then save_previous "$previous1"; fi
+docker image rm "$proxy_backup_ref" >/dev/null 2>&1 || true
+rm -rf "$proxy_backup"
 trap - EXIT
 echo "Deployed $IMAGE to both API containers on $DEPLOY_HOST"

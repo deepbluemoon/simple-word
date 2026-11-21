@@ -12,6 +12,7 @@ IMAGE_PROVIDED=0
 if [[ -n "${1:-${IMAGE:-}}" ]]; then IMAGE_PROVIDED=1; fi
 BROKEN_IMAGE="simple-word:qa-broken-${$}"
 PROXY_IMAGE="simple-word-proxy:qa-${$}"
+ROLLBACK_IMAGE="simple-word:qa-rollback-${$}"
 HOST_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 mkdir -p "$WORK_DIR/models"
 if [[ -n "$MODEL_SOURCE" ]]; then
@@ -64,8 +65,9 @@ unset DEPLOY_USER DOCKER_HOST WEIGHT_HOOK WEIGHT_HOOK_WAIT
 compose() { docker compose --project-name "$COMPOSE_PROJECT_NAME" --file "$DEPLOY_DIR/compose.yaml" "$@"; }
 cleanup() {
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
-    docker image rm "$BROKEN_IMAGE" "$PROXY_IMAGE" >/dev/null 2>&1 || true
+    docker image rm "$BROKEN_IMAGE" "$PROXY_IMAGE" "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
     (( IMAGE_PROVIDED )) || docker image rm "$GOOD_IMAGE" >/dev/null 2>&1 || true
+    [[ ! -e "$WORK_DIR/nginx-routes.conf.original" ]] || cp "$WORK_DIR/nginx-routes.conf.original" "$DEPLOY_DIR/nginx-routes.conf"
     rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
@@ -90,6 +92,12 @@ done) &
 request_pid=$!
 trap 'touch "$WORK_DIR/stop-requests"; wait "$request_pid" 2>/dev/null || true; cleanup' EXIT
 bash "$DEPLOY_DIR/rolling.sh" "$GOOD_IMAGE" "$MODEL_VERSION"
+touch "$WORK_DIR/stop-requests"
+wait "$request_pid"
+if ! awk '$1 !~ /^2/ { failed=1 } END { exit failed }' "$WORK_DIR/statuses"; then
+    echo "Requests failed during successful rolling replacement" >&2
+    exit 1
+fi
 proxy_id="$(compose ps --all --quiet proxy)"
 docker exec "$proxy_id" grep -q 'limit_conn_status 429' /etc/nginx/templates/default.conf.template
 compose restart proxy >/dev/null
@@ -98,17 +106,22 @@ for _ in {1..30}; do
     sleep 1
 done
 docker exec "$proxy_id" grep -q 'limit_conn_status 429' /etc/nginx/conf.d/default.conf
-touch "$WORK_DIR/stop-requests"
-wait "$request_pid"
-if ! awk '$1 !~ /^2/ { failed=1 } END { exit failed }' "$WORK_DIR/statuses"; then
-    echo "Requests failed during successful rolling replacement" >&2
-    exit 1
-fi
+docker tag "$GOOD_IMAGE" "$ROLLBACK_IMAGE"
+docker exec "$proxy_id" sh -c 'echo "# rollback-skip-marker" >> /etc/nginx/templates/default.conf.template'
+printf '%s\n' "$ROLLBACK_IMAGE" > "$DEPLOY_STATE_FILE"
+"$DEPLOY_DIR/rollback.sh" "$MODEL_VERSION"
+docker exec "$proxy_id" grep -q 'rollback-skip-marker' /etc/nginx/templates/default.conf.template
 
+docker image inspect "$PROXY_IMAGE" --format '{{.Id}}' > "$WORK_DIR/proxy-image-before-failure"
+cp "$DEPLOY_DIR/nginx-routes.conf" "$WORK_DIR/nginx-routes.conf.original"
+printf '\n# test-only proxy image change\n' >> "$DEPLOY_DIR/nginx-routes.conf"
 if bash "$DEPLOY_DIR/rolling.sh" "$BROKEN_IMAGE" "$MODEL_VERSION"; then
     echo "Expected unhealthy rolling deployment to fail" >&2
     exit 1
 fi
+cp "$WORK_DIR/nginx-routes.conf.original" "$DEPLOY_DIR/nginx-routes.conf"
+docker image inspect "$PROXY_IMAGE" --format '{{.Id}}' > "$WORK_DIR/proxy-image-after-failure"
+[[ "$(cat "$WORK_DIR/proxy-image-before-failure")" == "$(cat "$WORK_DIR/proxy-image-after-failure")" ]]
 for service in api-1 api-2; do
     container="$(compose ps --all --quiet "$service")"
     [[ "$(docker inspect --format '{{.Config.Image}}' "$container")" == "$GOOD_IMAGE" ]]
