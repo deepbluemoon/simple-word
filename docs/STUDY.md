@@ -55,7 +55,7 @@
 ## 8. 테스트 층
 - **단위 테스트**: `pytest`로 숫자 보존, 라우팅, 입력 검증처럼 코드 한 부분을 빠르게 확인한다.
 - **통합 테스트**: `scripts/integration.py`가 별도 Compose 프로젝트를 띄워 업로드·피드백·동시 요청 제한·레지스트리 교체를 함께 확인한다.
-- **배포 검증**: PR에서는 배포·API·모델·프런트엔드 파일을 바꿀 때 `.github/workflows/deploy-check.yml`이 `deploy/test-local.sh`를 실행한다. 배포 파이프라인은 이 재사용 워크플로를 카나리 전과 Lightsail 롤링 전에 같은 이미지·모델 버전으로 호출한다. 이 검사는 격리된 Compose 프로젝트에서 무중단 롤링·실패 복구와 smoke를 확인한다. nightly나 주간 예약은 두지 않는다.
+- **배포 검증**: PR에서는 배포·API·모델·프런트엔드 파일을 바꿀 때 `.github/workflows/deploy-check.yml`이 `deploy/test-local.sh`를 실행한다. 같은 워크플로는 이미지·모델 입력을 받는 `workflow_call`로도 쓸 수 있다. 실제 클라우드 배포 워크플로는 아직 없으므로, 추가할 때 카나리와 Lightsail 롤링 전에 이 검증을 호출해야 한다. nightly나 주간 예약은 두지 않는다.
 - **스모크 테스트**: 배포 직후 `scripts/smoke.py <주소>`로 health와 모델 버전, 숫자 보존, 문장 수, fallback 응답을 빠르게 확인한다.
 - **부하 테스트**: `scripts/load.py`가 동시 요청의 응답 시간 분포와 429 비율을 출력하고, 기준 옵션이 주어지면 초과 시 실패한다.
 - **브라우저 E2E**: Playwright가 실제 브라우저에서 업로드부터 결과 표시까지 화면과 API 연결을 검증한다. `.github/workflows/ci.yml`은 프런트엔드 단위 테스트·빌드를 돌리고, 브라우저 E2E는 `frontend`의 `npm run e2e`로 별도 실행한다. E2E와 backend nightly는 서로 다른 경로를 확인한다.

@@ -10,7 +10,7 @@ Lightsail은 현재 champion만 실행한다. nginx 뒤에 같은 이미지와 �
 IMAGE=ghcr.io/OWNER/simple-word:VERSION docker compose -f deploy/compose.yaml up -d --build --wait api-1 api-2 proxy
 ```
 
-새 이미지는 GCP 카나리와 섀도 트래픽으로 검증한 뒤 champion으로 승격하고 Lightsail에 롤링 반영한다. 배포 파이프라인은 `Deploy verification` 재사용 워크플로를 카나리 전과 Lightsail 롤링 직전에 호출해 같은 이미지·모델 버전으로 로컬 preflight를 통과시킨다. 현재 태그는 `deploy/common.sh`의 프로젝트·호스트별 상태 파일에 기록하고 이전 태그는 `.previous` 파일에 보관한다.
+새 이미지는 GCP 카나리와 섀도 트래픽으로 검증한 뒤 champion으로 승격하고 Lightsail에 롤링 반영한다. `Deploy verification` 재사용 워크플로는 같은 이미지·모델 버전으로 로컬 preflight를 실행하며, 향후 배포 워크플로가 GCP 카나리와 Lightsail 롤링 전에 이를 호출해야 한다. 현재 저장소에는 실제 클라우드 배포 호출자가 없다. 현재 태그는 `deploy/common.sh`의 프로젝트·호스트별 상태 파일에 기록하고 이전 태그는 `.previous` 파일에 보관한다.
 
 ```sh
 deploy/rolling.sh ghcr.io/OWNER/simple-word:VERSION MODEL_VERSION
