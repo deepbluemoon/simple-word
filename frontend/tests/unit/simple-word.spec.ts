@@ -33,7 +33,7 @@ describe('Simple Word API', () => {
     await expect(simplify(new File(['x'], 'x.txt'))).rejects.toMatchObject({ status, message: expect.stringContaining(message) })
   })
 
-  it.each([[408, '파일을 처리하는 데 시간이 오래 걸렸어요'], [413, '파일은 5MB 이하여야 해요'], [503, '서비스가 잠시 바빠요']])('explains upload failure %i', async (status, message) => {
+  it.each([[408, '파일을 처리하는 데 시간이 오래 걸렸어요'], [413, '파일은 5MB 이하여야 해요'], [415, 'PDF 파일은 지원하지 않아요'], [503, '서비스가 잠시 바빠요']])('explains upload failure %i', async (status, message) => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<html>proxy error</html>', { status }))
     await expect(simplify(new File(['x'], 'x.pdf'))).rejects.toMatchObject({ status, message: expect.stringContaining(message) })
   })

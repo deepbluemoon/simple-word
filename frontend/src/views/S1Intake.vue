@@ -60,7 +60,8 @@ async function submit() {
     : file.value
   if (!uploadFile) return
   if (mode.value === 'text' && !pasteText.value.trim()) { error.value = '공문서 내용을 붙여넣어 주세요.'; return }
-  if (!/\.(txt|docx|hwpx|pdf)$/i.test(uploadFile.name)) { error.value = 'TXT, DOCX, HWPX, PDF 파일을 올려 주세요.'; return }
+  if (/\.pdf$/i.test(uploadFile.name)) { error.value = 'PDF 파일은 지원하지 않아요. TXT, DOCX, HWPX 파일을 올려 주세요.'; return }
+  if (!/\.(txt|docx|hwpx)$/i.test(uploadFile.name)) { error.value = 'TXT, DOCX, HWPX 파일을 올려 주세요.'; return }
   if (uploadFile.size > 5 * 1024 * 1024) { error.value = '파일은 5MB 이하여야 해요.'; return }
   if (!uploadFile.size) { error.value = '내용이 비어 있어요. 공문서 내용을 넣어 주세요.'; return }
   busy.value = true; error.value = ''; retrySeconds.value = 0; retryAvailable.value = false
@@ -98,8 +99,8 @@ async function submit() {
         </div>
         <div v-if="busy" class="section tight" aria-live="polite"><C1Rail :steps="[{ label: '공문서 올리기', state: 'done' }, { label: '문장 나누기', state: 'done' }, { label: '쉬운 말 변환', state: 'now' }, { label: '완료', state: 'wait' }]" /><ProgressMeter :percent="progress" label="문서 처리 진행률"><b>문장을 확인해 쉬운 말로 바꾸고 있어요</b></ProgressMeter><ProgressWaitLine :elapsed-sec="elapsed" expected="문장 수에 따라 잠시 걸릴 수 있어요" /></div>
         <div v-else-if="mode === 'file'" ref="dropzone" class="dropzone" data-part="dropzone" tabindex="0" role="button" :aria-label="file ? `선택한 파일 ${file.name}. 파일을 바꾸려면 누르세요` : '공문서 파일을 놓거나 눌러 고르세요'" @click="input?.click()" @keydown.enter="input?.click()" @keydown.space.prevent="input?.click()" @dragover.prevent @drop="onDrop">
-          <input ref="input" data-part="file-input" class="visually-hidden" type="file" accept=".txt,.docx,.hwpx,.pdf" aria-label="공문서 파일 선택" @click.stop @change="choose(($event.target as HTMLInputElement).files?.[0]); ($event.target as HTMLInputElement).value = ''" />
-          <span class="drop-icon" aria-hidden="true">↑</span><strong>{{ file?.name ?? '파일을 이곳에 놓거나 눌러서 고르세요' }}</strong><span class="t-body-sm muted">TXT · DOCX · HWPX · PDF 파일을 올릴 수 있어요.</span>
+          <input ref="input" data-part="file-input" class="visually-hidden" type="file" accept=".txt,.docx,.hwpx" aria-label="공문서 파일 선택" @click.stop @change="choose(($event.target as HTMLInputElement).files?.[0]); ($event.target as HTMLInputElement).value = ''" />
+          <span class="drop-icon" aria-hidden="true">↑</span><strong>{{ file?.name ?? '파일을 이곳에 놓거나 눌러서 고르세요' }}</strong><span class="t-body-sm muted">TXT · DOCX · HWPX 파일을 올릴 수 있어요.</span>
         </div>
         <label v-else class="paste-input"><span class="t-body-sm-strong">공문서 내용</span><textarea v-model="pasteText" rows="8" maxlength="5000000" aria-label="쉬운 말로 바꿀 공문서 내용" aria-describedby="paste-hint paste-count" placeholder="공문서 내용을 여기에 붙여넣으세요."></textarea><span id="paste-hint" class="t-caption-sm muted">한 번에 최대 100문장까지 바꿀 수 있어요.</span><span id="paste-count" class="t-caption-sm muted">{{ pasteText.length.toLocaleString() }}자</span></label>
         <p v-if="error" class="error-message" role="alert">{{ error }}</p>

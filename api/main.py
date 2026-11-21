@@ -9,7 +9,6 @@ import time
 import uuid
 import zipfile
 import fcntl
-import multiprocessing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -22,15 +21,12 @@ from starlette.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from api.router import ModelRouter
-from api.pdf_worker import extract_pdf_worker
 
 app = FastAPI()
 LOG_DIR = Path(os.getenv("LOG_DIR", "./logs"))
 router = ModelRouter(os.getenv("REGISTRY_PATH", "models/registry.json"))
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_UNPACKED_BYTES = 20 * 1024 * 1024
-MAX_PDF_PAGES = 50
-PDF_PARSE_TIMEOUT_SECONDS = 10
 MAX_LOG_BYTES = 10 * 1024 * 1024
 MAX_LOG_BACKUPS = 3
 MIN_LOG_FREE_BYTES = 50 * 1024 * 1024
@@ -70,38 +66,6 @@ def xml_paragraph_text(data: bytes) -> str:
     return "\n\n".join(paragraphs)
 
 
-def extract_pdf_text(data: bytes) -> str:
-    context = multiprocessing.get_context("forkserver")
-    receive, send = context.Pipe(duplex=False)
-    process = context.Process(target=extract_pdf_worker, args=(data, send, MAX_PDF_PAGES))
-    try:
-        process.start()
-        send.close()
-        if not receive.poll(PDF_PARSE_TIMEOUT_SECONDS):
-            raise TimeoutError("PDF parsing timed out")
-        try:
-            ok, result = receive.recv()
-        except EOFError as exc:
-            logger.exception("PDF worker exited without returning a result")
-            raise RuntimeError("PDF worker exited without returning a result") from exc
-        if not ok:
-            if result == "page_limit":
-                raise HTTPException(status_code=400, detail="PDF exceeds 50-page limit")
-            error_type, _, error_message = result.partition("\0")
-            logger.warning("PDF parsing failed (%s): %s", error_type, error_message)
-            raise ValueError(error_type)
-        return result
-    finally:
-        if send:
-            send.close()
-        receive.close()
-        if process.pid is not None:
-            process.join(timeout=0.2)
-            if process.is_alive():
-                process.terminate()
-                process.join()
-
-
 def extract_text(filename: str, data: bytes) -> str:
     suffix = Path(filename).suffix.lower()
     try:
@@ -120,20 +84,11 @@ def extract_text(filename: str, data: bytes) -> str:
                 if not sections:
                     raise ValueError("HWPX contains no document sections")
                 return "\n".join(xml_paragraph_text(archive.read(name)) for name in sections)
-        if suffix == ".pdf":
-            return extract_pdf_text(data)
     except HTTPException:
         raise
-    except TimeoutError as exc:
-        raise HTTPException(status_code=503, detail="PDF parsing took too long; try a smaller or simpler PDF") from exc
     except (UnicodeDecodeError, zipfile.BadZipFile, KeyError, ElementTree.ParseError, DefusedXmlException, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid {suffix[1:].upper()} file: {exc}") from exc
-    except Exception as exc:
-        if suffix == ".pdf":
-            logger.exception("PDF processing failed")
-            raise HTTPException(status_code=500, detail="PDF processing failed") from exc
-        raise
-    raise HTTPException(status_code=400, detail="Supported files: .txt, .docx, .hwpx, .pdf")
+    raise HTTPException(status_code=400, detail="Supported files: .txt, .docx, .hwpx")
 
 
 @app.get("/health")
@@ -267,11 +222,16 @@ def run_shadow(request_id: str, version: str, model, sentences: list[str]) -> No
 
 @app.post("/simplify")
 async def simplify(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> dict:
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    media_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if suffix == ".pdf" or media_type == "application/pdf":
+        raise HTTPException(status_code=415, detail="PDF 파일은 지원하지 않아요. TXT, DOCX, HWPX 파일을 올려 주세요.")
     if not SIMPLIFY_SLOTS.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="Server is busy; retry shortly", headers={"Retry-After": "1"})
     try:
-        if not file.filename or Path(file.filename).suffix.lower() not in {".txt", ".docx", ".hwpx", ".pdf"}:
-            raise HTTPException(status_code=400, detail="Supported files: .txt, .docx, .hwpx, .pdf")
+        if not filename or suffix not in {".txt", ".docx", ".hwpx"}:
+            raise HTTPException(status_code=400, detail="Supported files: .txt, .docx, .hwpx")
         data = await file.read(MAX_UPLOAD_BYTES + 1)
         if len(data) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail="File exceeds 5 MB limit")
@@ -279,7 +239,7 @@ async def simplify(background_tasks: BackgroundTasks, file: UploadFile = File(..
             raise HTTPException(status_code=400, detail="File is empty")
         request_id = uuid.uuid4().hex
         payload, sentences, shadow_version, shadow_model = await run_in_threadpool(
-            simplify_content, file.filename, data, request_id
+            simplify_content, filename, data, request_id
         )
         if shadow_model is not None:
             background_tasks.add_task(run_shadow, request_id, shadow_version, shadow_model, sentences)

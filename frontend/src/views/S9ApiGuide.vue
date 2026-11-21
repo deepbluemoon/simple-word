@@ -2,7 +2,7 @@
   <div class="page wide">
     <section class="api-hero"><div><p class="hero-kicker">개발자 안내</p><h1 class="t-display-xl">쉬운글 API 사용법</h1></div><p class="lede">공문서를 보내 쉬운 말 결과를 받고, 문장별 의견을 보낼 수 있어요. API는 같은 주소에서 사용할 수 있습니다.</p></section>
     <section class="section rules">
-      <h2>공문서 바꾸기</h2><p><code>POST /simplify</code> 요청의 본문을 <code>multipart/form-data</code>로 보내고, 파일 필드 이름은 <code>file</code>로 지정하세요. TXT, DOCX, HWPX, PDF 파일을 지원하며 최대 크기는 5MB예요.</p>
+      <h2>공문서 바꾸기</h2><p><code>POST /simplify</code> 요청의 본문을 <code>multipart/form-data</code>로 보내고, 파일 필드 이름은 <code>file</code>로 지정하세요. TXT, DOCX, HWPX 파일을 지원하며 최대 크기는 5MB예요.</p>
       <div class="terminal-card"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><pre><span class="c"># 예시: 파일을 올려 결과 받기</span>
 curl -X POST http://localhost:8000/simplify \\
   -F 'file=@공문서.txt'</pre></div>

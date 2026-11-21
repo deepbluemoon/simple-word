@@ -11,9 +11,9 @@
 - 남은 작업: 로컬 pytest 실행은 환경의 mise Python 버전 문제와 시스템 Python의 pytest 미설치로 실행하지 못했다. 의존성 설치는 하지 않았다.
 
 ## 2026-11-19 Codex T8
-- `codex/t8-web-ui`에서 모바일 대응 업로드 UI, TXT/DOCX/HWPX/PDF 추출, 5 MiB·빈 파일 검증, JSONL 피드백 저장, Dockerfile과 Compose를 추가했다.
+- `codex/t8-web-ui`에서 모바일 대응 업로드 UI, TXT/DOCX/HWPX 추출, 5 MiB·빈 파일 검증, JSONL 피드백 저장, Dockerfile과 Compose를 추가했다. PDF 처리 코드는 후속 변경에서 제거했다.
 - 검증: `pytest -q` 9 passed. Compose 기동 후 `/health`, 샘플 TXT·DOCX 업로드 응답을 확인하고 `down`했다.
-- 리뷰 후 압축 해제 총량 20 MiB, PDF 50페이지, 문장 500개 제한과 `/feedback` 문자열 2,000자 제한을 추가했다. 추출·모델 실행은 Starlette threadpool에서 처리한다.
+- 리뷰 후 압축 해제 총량 20 MiB, 문장 500개 제한과 `/feedback` 문자열 2,000자 제한을 추가했다. 추출·모델 실행은 Starlette threadpool에서 처리한다.
 - 검증: `pytest -q` 15 passed. Compose 컨테이너 UID 10001(app) 확인, POST `/feedback` 성공 및 JSONL 저장 확인 후 전용 테스트 볼륨을 제거했다.
 
 ## 2026-11-19 Codex T7
@@ -79,5 +79,6 @@
 - **#59 되돌림(#67):** 그 사이(12:49~) main으로 잰 fallback·숫자 일치 값은 버리고 `655cd05` 기준으로 다시 쟀다.
 
 ## 2026-11-22 후속 PR 순서
-- PR #70 `codex/security-fixes`는 보안 수정·리뷰 후속을 처리 중이다. 병합 전 설정 검사 실패 시 nginx 이전 설정 복구를 보장하고 전체 CI를 통과해야 한다.
-- 총괄이 #70을 검토·병합한 뒤 PR #72 `codex/lightsail-bootstrap`, 이어서 PR #66 `codex/deploy-check-paths`를 처리한다. Codex는 PR을 병합하지 않는다.
+- PR #70 `codex/security-fixes`는 `47f97b9`로 병합됐다.
+- PR #73 `codex/gcp-setup`은 main에 병합됐다.
+- PR #81 `codex/drop-pdf`는 PDF 입력을 415로 거절하고 파서·의존성을 제거한다. `origin/main` 위로 rebase해 `TASKS.md` 충돌을 해결했고, 재실행한 CI의 네 job이 모두 통과했다. PR #81 병합 뒤 PR #72 `codex/lightsail-bootstrap`, 마지막으로 PR #66 `codex/deploy-check-paths`를 처리한다. Codex는 PR을 병합하지 않는다.

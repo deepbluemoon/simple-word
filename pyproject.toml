@@ -10,7 +10,6 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "python-multipart",
-    "pypdf",
     "defusedxml",
     "numpy",
     "onnxruntime",
