@@ -16,7 +16,7 @@
 작업의 기준은 GitHub Issues다(https://github.com/deepbluemoon/simple-word/issues). 아래 표는 요약이고, 규칙은 `docs/BRANCHING.md`.
 
 ### 현재 기준
-- **기준 시점**: 2026-11-20, `main`은 PR #51까지의 기능 작업이 반영됐고 최신 문서 진행 기록은 PR #52다.
+- **기준 시점**: 2026-11-22, `main`은 2차 마무리 및 PR #80까지 반영됐다.
 - **모델**: champion은 v2이다. 평가셋 v2(200문장, 정답 2개, SHA-1 `8922190f`, `docs/EVAL_SET.md`)로 게이트를 다시 돌려 v2→v3-base가 PASS했다. v3-base는 **canary 후보(weight 0, `pending_canary`)로만** 등록했고, 클라우드 카나리·섀도 검증 전에는 champion을 바꾸지 않는다. v3-ph는 참고용이다(fallback은 가장 낮지만 어려운 용어 유지율이 높음, 조사 교정 #62).
 - **배포**: Lightsail 롤링 업데이트 로컬 검증 완료. 실제 Lightsail·GCP·Route 53 연결은 계정·도메인 준비 후 진행한다.
 - **데이터**: PR #51에서 두 부처 3,788개 문서, 20,768개 짝, 통과 13,176개까지 2년치 백필했다. 부처 추가는 미진행.
@@ -46,4 +46,4 @@
 | T20 (#70) | 보안 보강 후속: PDF 격리, 프록시 설정 복구, 오류 응답·피드백 보호 | Codex | doing (`codex/security-fixes`) |
 | T21 (#72) | Lightsail TLS·갱신 훅·Compose 설정 리뷰 수정 | Codex | queued after #70 |
 | T22 (#66) | 배포 검증 경로·롤링 복구 검사 리뷰 수정 | Codex | queued after #72 |
-| T23 (#73) | GCP 예산·Artifact Registry·모델 버킷·서비스 계정·GitHub WIF·배포 스크립트 | Codex | review (main rebase 및 리뷰 수정 진행 중) |
+| T23 (#73) | GCP 예산·Artifact Registry·모델 버킷·서비스 계정·GitHub WIF·배포 스크립트 | Codex | review (main rebase, 리뷰 수정·전체 테스트 완료; CI 확인 중) |

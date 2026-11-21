@@ -35,7 +35,11 @@ fi
 if ! gcloud_project storage buckets describe "gs://$BUCKET" >/dev/null 2>&1; then
   gcloud_project storage buckets create "gs://$BUCKET" --location="$REGION" --uniform-bucket-level-access --public-access-prevention
 fi
-gcloud_project storage buckets update "gs://$BUCKET" --public-access-prevention --lifecycle-file="$(dirname -- "$0")/lifecycle.json"
+tmp_lifecycle="$(mktemp -d)"
+trap 'rm -rf "$tmp_lifecycle"' EXIT
+gcloud_project storage buckets describe "gs://$BUCKET" --format=json >"$tmp_lifecycle/current.json"
+python3 "$(dirname -- "$0")/merge_lifecycle.py" "$tmp_lifecycle/current.json" "$(dirname -- "$0")/lifecycle.json" "$tmp_lifecycle/merged.json"
+gcloud_project storage buckets update "gs://$BUCKET" --public-access-prevention --lifecycle-file="$tmp_lifecycle/merged.json"
 
 for account in "$RUNTIME_SA" "$DEPLOY_SA"; do
   if ! gcloud_project iam service-accounts describe "$account@$PROJECT.iam.gserviceaccount.com" >/dev/null 2>&1; then
@@ -43,7 +47,14 @@ for account in "$RUNTIME_SA" "$DEPLOY_SA"; do
   fi
 done
 gcloud_project storage buckets add-iam-policy-binding "gs://$BUCKET" --member="serviceAccount:$RUNTIME_SA@$PROJECT.iam.gserviceaccount.com" --role=roles/storage.objectViewer
+RUN_PUBLIC_ROLE=simpleWordPublicServiceIam
+if gcloud_project iam roles describe "$RUN_PUBLIC_ROLE" >/dev/null 2>&1; then
+  gcloud_project iam roles update "$RUN_PUBLIC_ROLE" --title='simple-word public service IAM' --description='Allows the deployer to set Cloud Run service IAM policies for the public service' --permissions=run.services.setIamPolicy --stage=GA
+else
+  gcloud_project iam roles create "$RUN_PUBLIC_ROLE" --title='simple-word public service IAM' --description='Allows the deployer to set Cloud Run service IAM policies for the public service' --permissions=run.services.setIamPolicy --stage=GA
+fi
 gcloud_project projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$DEPLOY_SA@$PROJECT.iam.gserviceaccount.com" --role=roles/run.developer --condition=None
+gcloud_project projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$DEPLOY_SA@$PROJECT.iam.gserviceaccount.com" --role="projects/$PROJECT/roles/$RUN_PUBLIC_ROLE" --condition=None
 gcloud_project artifacts repositories add-iam-policy-binding "$REPOSITORY" --location="$REGION" --member="serviceAccount:$DEPLOY_SA@$PROJECT.iam.gserviceaccount.com" --role=roles/artifactregistry.writer
 gcloud_project iam service-accounts add-iam-policy-binding "$RUNTIME_SA@$PROJECT.iam.gserviceaccount.com" --member="serviceAccount:$DEPLOY_SA@$PROJECT.iam.gserviceaccount.com" --role=roles/iam.serviceAccountUser
 

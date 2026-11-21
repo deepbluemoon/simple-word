@@ -262,6 +262,7 @@
 - PR을 최신 main에 rebase하면서 `HANDOFF.md`, `TASKS.md`, `docs/PROGRESS.md` 충돌을 해결했다. 최신 main의 Cloud Run 배포 완료 기록과 예산 30 USD 결정을 유지한다.
 - 예산은 같은 GCP budget ID를 39,937 KRW로 갱신했고 50/90/100% 알림이 유지됨을 확인했다. GCP 명령은 `--project simple-word-515207`로만 실행한다.
 - deploy volume/mount·gen2·min/max 플래그를 교정했다. setup 재실행은 버킷 공개 방지와 owner ID 제한 WIF를 재적용하고 deployer 읽기 권한을 보장한다. 예산 전용 실행으로 이번 검증 중 배포 버킷은 건드리지 않았다.
+- 리뷰 후속 수정: 재실행 시 기존 버킷 lifecycle 중 `staging/` 정리 규칙만 교체하고 나머지는 보존한다. Cloud Run 환경 변수는 `--update-env-vars`로 갱신한다. 공개 배포를 위해 deployer에 `run.services.setIamPolicy` 하나만 포함한 프로젝트 커스텀 역할을 추가했다(프로젝트 내 Cloud Run 서비스 IAM 변경 가능). pytest 118 passed, 1 skipped; bash 구문 검사 통과. GCP 리소스 변경은 수행하지 않았다.
 
 ## 사용자 준비 (필요해질 때)
 - 클라우드: GCP 프로젝트·결제 완료, Lightsail 인스턴스·고정 IP·버킷 완료. 쓰지 않는 Route 53 호스팅 영역 삭제 필요
