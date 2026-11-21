@@ -50,12 +50,12 @@
 - 지금 데이터 기준 통과 짝 2,053 = v2 학습 크기 → 새 짝이 200건 늘기 전에는 학습하지 않는다.
 - 남은 것: 러너 등록(label `trainer`)과 저장소 변수 `TRAINER_ENABLED`·`TRAINER_HOME` (사용자).
 
-## 2026-11-22 기준 상태 (main, PR #81까지 기능 반영)
+## 2026-11-22 기준 상태 (main, PR #82까지 기능 반영)
 - 최신 main에는 PR #51의 2년치 백필 결과가 반영되어 있다: 보도자료 3,788건, 교사 짝 20,768건, 자동 검사 통과 13,176건. 출처는 행정안전부·보건복지부이며 부처 추가는 아직 안 했다. PR #52는 이 진행 기록을 반영한 문서 변경이다.
 - champion은 v2다. v3-base는 평가셋 v2 게이트를 통과했지만, Cloud Run 카나리·섀도 검증 전까지는 weight 0 후보로 유지한다.
 - PR #50의 `found()` 최적화는 사전 1,627개 용어 × 합성 문장 10,000개에서 결과 2,157건 일치, 최적화 후 1.398초였다. 기존 방식 100문장 측정 37.473초를 선형 환산하면 약 62.5분(추정)이다.
 - 배포 확정안: 도메인과 Route 53은 쓰지 않는다. Lightsail nginx가 Lightsail API 두 개와 공개 Cloud Run `run.app`으로 90/10 분산하고, API 둘 다 실패하면 Cloud Run으로 보낸다. Cloud Run은 1 GiB, min 0/max 2이며 리비전 카나리·섀도·오토스케일링을 맡는다. Lightsail 전체 장애 때는 `run.app` 주소를 수동 안내한다.
-- 다음은 Codex의 TXT/DOCX/HWPX 예시·제목 보존 PR, 이어서 codex2 PR #74다. 평가셋은 Claude가 193건을 검수했으며 사람의 재검토는 별도 결정 사항이다.
+- TXT/DOCX/HWPX 예시·제목 보존은 PR #82로 병합됐다. n-best 추론 수정 PR #74는 rebase와 테스트를 진행 중이다. 평가셋은 Claude가 193건을 검수했으며 사람의 재검토는 별도 결정 사항이다.
 
 ## PR #68 문서 보기 리뷰 수정 (Codex)
 - 문장 선택 요소를 줄바꿈 가능한 inline 키보드 버튼으로 바꾸고, 의견 투표를 결과·문장 단위로 양쪽 보기와 새로고침에서 공유한다. 활성 보기만 렌더링하며 결과 ID 변경 시 선택과 탭을 초기화한다.
@@ -83,4 +83,9 @@
 - PR #73 `codex/gcp-setup`은 main에 병합됐다.
 - PR #81 `codex/drop-pdf`는 병합됐다.
 - PR #72는 codex2가 #70 후속 보완과 함께 진행한다. Codex는 현재 `codex/deploy-check-paths`에서 #66 rebase·리뷰 수정·검증을 처리한다.
-- #66은 병합됐다. T25 예시 파일·제목 보존은 `codex/title-samples`에서 준비 중이고, 이후 순서는 총괄의 병합 뒤 codex2 PR #74다. PR 병합은 총괄이 한다.
+- #66과 #82는 병합됐다. PR #74 `codex/nbest-fixes`는 rebase 후 전체 테스트를 통과했다. PR 병합은 총괄이 한다.
+
+## PR #74 n-best 후속 수정
+- `simple_word/model.py`는 폭 1의 greedy와 beam 탐색을 같은 경로에서 처리하고, beam 후보를 전역 점수로 순위화한다. 빈 출력·너무 짧은 beam 결과와 무효 logits는 원문 fallback으로 처리한다.
+- `training/export.py`와 parity 스크립트는 dynamic beam 축을 export하고, FP32 reference와 비교한 뒤 ONNX 출력으로 parity fixture를 기록한다. 저장소 밖에서 실행하는 benchmark/parity 스크립트의 import 경로도 고쳤다.
+- `.venv/bin/python -m pytest -q`: 146 passed. 임시 소형 KoBART로 greedy·beam 결과를 Hugging Face generate와 비교한다. 실제 v2 ONNX(20개 parity 입력 × 3회)에서 기준 브랜치 p95/RSS는 93.4ms/359.6MiB, 현재 폭 1 경로는 92.3ms/295.6MiB였다. metadata의 모델 메모리는 272.1MB(300MB의 91%)로 기록되어 있으나, 전체 Python 프로세스 peak RSS는 295.6MiB(한도의 98.5%)라 여유가 약 4.4MiB다.

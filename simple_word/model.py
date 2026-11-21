@@ -107,7 +107,48 @@ class Simplifier:
         return out
 
     def _candidates(self, text, slots=None, force=False):
+        if getattr(self, "num_beams", 1) == 1:
+            return [self._one(text) if slots is None and not force else self._one(text, slots=slots, force=force)]
         return self._beam(text, slots, force)
+
+    def _one(self, text, max_len=256, slots=None, force=False):
+        """기존 챔피언의 greedy 경로를 유지해 폭 1 배포의 지연·메모리를 보존한다."""
+        import numpy as np
+
+        ids = self.tok.encode(text, add_special_tokens=False).ids
+        if len(ids) > max_len - 1:
+            return None
+        ids = ids + [EOS]
+        x = np.array([ids], dtype=np.int64)
+        mask = np.ones_like(x)
+        cross = self.encoder.run(None, {"input_ids": x, "attention_mask": mask})
+        feed = {"attention_mask": mask}
+        feed.update((output.name, value) for output, value in zip(self.encoder.get_outputs(), cross))
+        heads, hd = cross[0].shape[1], cross[0].shape[3]
+        past_names = [item.name for item in self.decoder.get_inputs() if item.name.startswith("past_")]
+        past = [np.zeros((1, heads, 0, hd), dtype=np.float32) for _ in past_names]
+        need, banned = set(), []
+        if slots is not None:
+            token_ids = {token: self.tok.token_to_id(token) for token in PH_TOKENS}
+            need = {token_ids[token] for token in slots}
+            banned = [token_id for token, token_id in token_ids.items() if token not in slots and token_id is not None]
+        out = [EOS]
+        for step in range(min(2 * len(ids) + 16, max_len)):
+            feed.update(zip(past_names, past))
+            feed["input_ids"] = np.array([[out[-1]]], dtype=np.int64)
+            feed["position_ids"] = np.array([[step]], dtype=np.int64)
+            logits, *past = self.decoder.run(None, feed)
+            row = logits[0, -1]
+            if slots is not None:
+                row = row.copy()
+                row[banned] = -np.inf
+                if force and need - set(out):
+                    row[EOS] = -np.inf
+            token = int(row.argmax())
+            if token == EOS:
+                break
+            out.append(token)
+        return self.tok.decode(out[1:], skip_special_tokens=True).strip()
 
     def _beam(self, text, slots=None, force=False, max_len=256):
         """폭 1은 greedy, 넓은 폭은 배치 beam search로 안전 후보를 점수 순 반환한다."""
@@ -145,18 +186,24 @@ class Simplifier:
             feed["input_ids"] = np.array([[beam[0][-1]] for beam in beams], dtype=np.int64)
             feed["position_ids"] = np.full((batch, 1), step, dtype=np.int64)
             logits, *next_past = self.decoder.run(None, feed)
-            logits = logits[:, -1, :].astype(np.float64)
-            normalizers = np.logaddexp.reduce(logits, axis=1, keepdims=True)
-            valid_rows = np.isfinite(normalizers[:, 0])
-            log_probs = np.full_like(logits, -np.inf)
-            log_probs[valid_rows] = logits[valid_rows] - normalizers[valid_rows]
+            logits = logits[:, -1, :]
+            if width > 1:
+                logits = logits.astype(np.float64)
+                normalizers = np.logaddexp.reduce(logits, axis=1, keepdims=True)
+                valid_rows = np.isfinite(normalizers[:, 0])
+                log_probs = np.full_like(logits, -np.inf)
+                log_probs[valid_rows] = logits[valid_rows] - normalizers[valid_rows]
             candidates = []
             for parent, (tokens, score, _) in enumerate(beams):
-                row = log_probs[parent].copy()
+                row = logits[parent].copy() if width == 1 else log_probs[parent].copy()
                 if slots is not None:
                     row[banned] = -np.inf
                     if force and need - set(tokens):
                         row[EOS] = -np.inf
+                if width == 1:
+                    if np.isfinite(row).any():
+                        candidates.append((score, parent, int(row.argmax())))
+                    continue
                 count = min(2 * width, np.isfinite(row).sum())
                 if not count:
                     continue
@@ -182,9 +229,9 @@ class Simplifier:
             beams = next_beams
             if not beams:
                 break
-            if len(finished) == width and self._normalized_score(finished[-1][1], finished[-1][0]) >= max(
-                self._normalized_score(beam[1], beam[0]) for beam in beams
-            ):
+            # Future log probabilities cannot exceed zero; use the maximum output length as a safe score bound.
+            best_possible = max(beam[1] / steps**LENGTH_PENALTY for beam in beams)
+            if len(finished) == width and self._normalized_score(finished[-1][1], finished[-1][0]) >= best_possible:
                 break
         ranked = finished + [(tokens, score) for tokens, score, _ in beams]
         ranked.sort(key=lambda item: (-self._normalized_score(item[1], item[0]), item[0]))

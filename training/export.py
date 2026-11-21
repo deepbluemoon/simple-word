@@ -146,17 +146,20 @@ def _generate_reference(model, tokenizer, inputs, num_beams, placeholders, force
             logits_processors.append(RequirePlaceholders())
         generated = model.generate(
             input_ids=input_ids, attention_mask=torch.ones_like(input_ids), do_sample=False,
-            num_beams=num_beams, length_penalty=1.0, early_stopping=False,
+            num_beams=num_beams, num_return_sequences=num_beams, length_penalty=1.0, early_stopping=False,
             max_new_tokens=min(2 * len(ids) + 16, 256), min_length=0,
             decoder_start_token_id=1, eos_token_id=1, pad_token_id=3,
             forced_bos_token_id=None, forced_eos_token_id=None,
             bad_words_ids=bad_words or None, logits_processor=logits_processors or None,
         )
-        text = tokenizer.decode(generated[0], skip_special_tokens=True).strip()
-        text = unmask(text, slots) if placeholders else text
-        if (text is None or not text or (num_beams > 1 and len(text) * 2 < len(source))
-                or numbers(text) != numbers(source)
-                or missing_terms(source, text, preserve_terms())):
+        for candidate in generated:
+            text = tokenizer.decode(candidate, skip_special_tokens=True).strip()
+            text = unmask(text, slots) if placeholders else text
+            if (text is not None and text and (num_beams == 1 or len(text) * 2 >= len(source))
+                    and numbers(text) == numbers(source)
+                    and not missing_terms(source, text, preserve_terms())):
+                break
+        else:
             text = source
         outputs.append(text)
     return outputs

@@ -34,12 +34,19 @@ def test_hf_parity_reference_uses_requested_beam_settings(monkeypatch):
     class Tokenizer:
         def get_vocab(self): return {}
         def encode(self, text, add_special_tokens=False): return [7, 8]
-        def decode(self, ids, skip_special_tokens=True): return "원문을 더 쉽게 바꾼 안내 문장입니다."
+        def decode(self, ids, skip_special_tokens=True):
+            ids = tuple(token for token in ids if token != 1)
+            return {
+                (7,): "신청 금액은 200원이며 안내를 확인하고 신청서를 제출하세요.",
+                (8,): "신청 금액은 100원이며 안내를 확인하고 신청서를 제출해 주세요.",
+                (9,): "짧은 결과",
+                (10,): "신청 금액은 200원이고 신청서를 제출합니다.",
+            }[tuple(ids)]
 
     class Model:
         def generate(self, **kwargs):
             self.kwargs = kwargs
-            return [[1, 7, 1]]
+            return [[1, token, 1] for token in (7, 8, 9, 10)]
 
     class LogitsProcessor: pass
 
@@ -48,9 +55,11 @@ def test_hf_parity_reference_uses_requested_beam_settings(monkeypatch):
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(LogitsProcessor=LogitsProcessor))
     model = Model()
-    output = _generate_reference(model, Tokenizer(), ["원문 안내 문장입니다."], 4, False, False)
-    assert output == ["원문을 더 쉽게 바꾼 안내 문장입니다."]
+    source = "신청 금액은 100원이며 안내를 확인하고 신청서를 제출해야 합니다."
+    output = _generate_reference(model, Tokenizer(), [source], 4, False, False)
+    assert output == ["신청 금액은 100원이며 안내를 확인하고 신청서를 제출해 주세요."]
     assert model.kwargs["num_beams"] == 4
+    assert model.kwargs["num_return_sequences"] == 4
     assert model.kwargs["length_penalty"] == 1.0
     assert model.kwargs["early_stopping"] is False
     _assert_parity(output, output)
@@ -277,7 +286,7 @@ def test_beam_uses_next_candidate_when_top_candidate_fails_number_guard(monkeypa
     assert simp.simplify_explained(["20일 이내에 접수합니다."]) == [
         ("20일 이내에 접수합니다.", False, None)
     ]
-    assert simp.decoder.batch_sizes == [1, 2]  # 한 단계마다 모든 살아 있는 빔을 한 번에 추론
+    assert simp.decoder.batch_sizes == [1, 2, 2]  # 상한에 도달하기 전까지 살아 있는 빔을 함께 탐색
 
 
 def test_beam_uses_global_top_two_width_and_ignores_lower_ranked_eos():
@@ -320,7 +329,51 @@ def test_beam_uses_global_top_two_width_and_ignores_lower_ranked_eos():
 
     assert "" not in outputs
     assert "early-two" in outputs
-    assert simp.decoder.batch_sizes == [1, 2, 2]
+    assert simp.decoder.batch_sizes[:3] == [1, 2, 2]
+
+
+def test_beam_keeps_searching_when_a_live_beam_can_improve_with_length_penalty():
+    import numpy as np
+
+    class Tok:
+        def encode(self, _text, add_special_tokens=False): return type("E", (), {"ids": [7]})()
+        def decode(self, ids, skip_special_tokens=True):
+            return {(2, 1): "short-finish", (2, 4, 1): "early-finish",
+                    (2, 4, 6, 1): "best-continuation", (3, 1): "other-finish"}.get(tuple(ids), "other")
+
+    class Encoder:
+        def run(self, *_args): return [np.zeros((1, 1, 1, 1), dtype=np.float32)]
+        def get_outputs(self): return [type("O", (), {"name": "cross_k"})()]
+
+    class Decoder:
+        def __init__(self): self.batch_sizes = []
+        def get_inputs(self): return [type("I", (), {"name": "cross_k"})()]
+        def run(self, _outputs, feed):
+            batch = feed["input_ids"].shape[0]
+            step = int(feed["position_ids"][0, 0])
+            self.batch_sizes.append(batch)
+            logits = np.full((batch, 1, 8), -100.0, dtype=np.float32)
+            if step == 0:
+                logits[0, 0, 2:4] = 10.0
+            elif step == 1:
+                logits[0, 0, 1], logits[0, 0, 4] = 10.0, 10.0
+                logits[1, 0, 1], logits[1, 0, 5] = 10.0, 4.0
+            elif step == 2:
+                logits[0, 0, 6], logits[0, 0, 1] = 10.0, -20.0
+                logits[1, 0, 1] = 10.0
+            else:
+                logits[0, 0, 1] = 10.0
+                logits[1, 0, 7] = 10.0
+            return [logits]
+
+    simp = Simplifier.__new__(Simplifier)
+    simp.dummy, simp.tok, simp.encoder, simp.decoder = False, Tok(), Encoder(), Decoder()
+    simp.num_beams = 2
+
+    outputs = simp._candidates("source")
+
+    assert "best-continuation" in outputs
+    assert simp.decoder.batch_sizes == [1, 2, 2, 2]
 
 
 def test_empty_and_short_beam_candidates_are_skipped():
