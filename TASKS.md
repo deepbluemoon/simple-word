@@ -18,7 +18,7 @@
 ### 현재 기준
 - **기준 시점**: 2026-11-22, `main`은 PR #81까지 반영됐다.
 - **모델**: champion은 v2이다. 평가셋 v2(200문장, 정답 2개, SHA-1 `8922190f`, `docs/EVAL_SET.md`)로 게이트를 다시 돌려 v2→v3-base가 PASS했다. v3-base는 **canary 후보(weight 0, `pending_canary`)로만** 등록했고, 클라우드 카나리·섀도 검증 전에는 champion을 바꾸지 않는다. v3-ph는 참고용이다(fallback은 가장 낮지만 어려운 용어 유지율이 높음, 조사 교정 #62).
-- **배포**: Lightsail 롤링 업데이트 로컬 검증 완료. 실제 Lightsail·GCP·Route 53 연결은 계정·도메인 준비 후 진행한다.
+- **배포**: 도메인과 Route 53은 쓰지 않는다. Lightsail nginx가 API 두 개와 Cloud Run `run.app`으로 90/10 분산하고, API 둘 다 실패하면 Cloud Run으로 보낸다. Lightsail 전체 장애 때는 run.app 주소를 수동 안내한다.
 - **데이터**: PR #51에서 두 부처 3,788개 문서, 20,768개 짝, 통과 13,176개까지 2년치 백필했다. 부처 추가는 미진행.
 
 | ID | 작업 | 담당 | 상태 |
@@ -32,7 +32,7 @@
 | T7 (#3) | 라우터(champion·canary·shadow, registry 다시 읽기), 부하 차단, 게이트·parity, `reports/` 기록 | Codex | done |
 | T8 | 업로드 웹 화면, Dockerfile·docker compose로 로컬 전체 실행 | Codex | done |
 | T9 (#5) | RM ops-dashboard 가져오기, 로컬 실행 전용, AWS·GCP 감시 + 비용 | codex2 | done |
-| T10 (#6) | 로컬 배포 검증 후 Lightsail·GCP·Route 53 배포와 장애 조치 | codex2 + 사용자(계정·도메인) | doing (롤링 로컬 검증 완료, 클라우드 대기) |
+| T10 (#6) | Lightsail·Cloud Run 배포와 장애 조치 | codex2 + 사용자 | doing (롤링 로컬 검증 완료, Cloud Run 배포됨) |
 | T11 (#7) | 검수 평가셋 200건 준비·검수 | Claude Max + 사용자 | done (v1: Claude 검수 193건 → v2: 200건·정답 2개, 적극적 쉬운 말(#69); 사람 검수 아님) |
 | T8b (#4) | 서비스 화면 Airtable 팔레트 | codex2 | done |
 | T12 (#8) | 셀프호스티드 러너, 수집·누적 학습 워크플로 | 총괄 + 사용자 | waiting user (러너 토큰) |
